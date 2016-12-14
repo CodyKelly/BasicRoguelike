@@ -47,5 +47,18 @@ class Map:
 				
 		room1 = Rect(20,15,10,15)
 		room2 = Rect(50, 15, 10, 15)
+		
 		self.create_room(room1)
-		self.create_room(room2)
+		self.create_room(room2)	
+		
+		self.create_h_tunnel(25, 55, 23)
+	
+	def create_h_tunnel(self, x1, x2, y):
+		for x in range(min(x1, x2), max(x1, x2) + 1):
+			self.map[x][y].blocked = False
+			self.map[x][y].block_sight = False
+			
+	def create_v_tunnel(self, y1, y2, x):
+		for y in range(min(y1, y2), max(y1, y2) + 1):
+			self.map[x][y].blocked = False
+			self.map[x][y].block_sight = False
