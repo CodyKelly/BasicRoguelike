@@ -41,7 +41,7 @@ class Map:
 		# Dungeon generator variables
 		self.room_max_size = 10
 		self.room_min_size = 6
-		self.max_rooms = 10
+		self.max_rooms = 30
 		self.center_of_first_room = (0, 0) # This will be changed when dungeon is generated
 		
 		# Tells the game if the fov map needs to be recomputed
