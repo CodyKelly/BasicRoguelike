@@ -18,10 +18,11 @@ class Object(object):
 		except IndexError:
 			print("Trying to go out of map bounds at (" + str(self.x) + ", " + str(self.y) + ")")
 		
-	def draw(self, con):
+	def draw(self, con, map):
 		# Draws the object's character from the screen
-		libtcod.console_set_default_foreground(con, self.color)
-		libtcod.console_put_char(con, self.x, self.y, self.char, libtcod.BKGND_NONE)
+		if libtcod.map_is_in_fov(map.fov_map, self.x, self.y):
+			libtcod.console_set_default_foreground(con, self.color)
+			libtcod.console_put_char(con, self.x, self.y, self.char, libtcod.BKGND_NONE)
 		
 	def clear(self, con):
 		# Erases the object's character from the screen

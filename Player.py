@@ -4,6 +4,11 @@ import libtcodpy as libtcod
 class Player(Object):
 	def __init__(self, x, y, char, color):
 		Object.__init__(self, x, y, char, color)
+		
+		self.FOV_algo = 0 # Default Field Of View algorithm
+		self.FOV_light_walls = True
+		
+		self.view_radius = 10
 	
 	def update(self, map, objects):
 		super(Player, self).update(map, objects)

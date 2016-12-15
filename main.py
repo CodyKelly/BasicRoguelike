@@ -8,7 +8,7 @@ SCREEN_WIDTH = 80
 SCREEN_HEIGHT = 50
 
 player = Player(25, 23, '@', libtcod.white)
-npc = Object(SCREEN_WIDTH / 2 - 5, SCREEN_HEIGHT / 2, '@', libtcod.yellow)
+npc = Object(55, 23, '@', libtcod.yellow)
 objects = [npc, player]
 
 # Set console font
@@ -22,10 +22,14 @@ map = Map(80, 50)
 
 def render_all():
 	for obj in objects:
-		obj.draw(con)
+			obj.draw(con, map)
 		
-	map.draw(con)
+	if map.fov_recompute:
+		# If the map needs to recompute the FOV map, do it once
+		map.fov_recompute = False
+		map.recompute_fov_map(player)
 	
+	map.draw(con)
 		
 	# Blit contents on the 'con' console to the root console
 	libtcod.console_blit(con, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, 0, 0, 0)
@@ -47,6 +51,8 @@ while not libtcod.console_is_window_closed():
 	
 	for obj in objects:
 		obj.update(map, objects)
+	
+	map.update()
 	
 	render_all()
 	
