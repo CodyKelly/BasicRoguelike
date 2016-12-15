@@ -149,6 +149,7 @@ class Map:
 				
 				rooms.append(new_room)
 				num_rooms += 1
+		self.make_fov_map()
 		
 	def make_fov_map(self):
 		self.fov_map = libtcod.map_new(self.width, self.height)
@@ -169,3 +170,9 @@ class Map:
 			
 	def recompute_fov_map(self, player):
 		libtcod.map_compute_fov(self.fov_map, player.x, player.y, player.view_radius, player.FOV_light_walls, player.FOV_algo)
+		
+	def clear(self, con):
+		self.map = []
+		for y in range(self.height):
+			for x in range(self.width):
+				libtcod.console_set_char_background(con, x, y, libtcod.black, libtcod.BKGND_SET)

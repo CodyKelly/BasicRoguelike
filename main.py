@@ -48,8 +48,11 @@ def handle_keys():
 	if key.vk == libtcod.KEY_F1:
 		FOV = not FOV
 	if key.vk == libtcod.KEY_F2:
+		map.clear(con)
 		map.make_map()
 		player.set_position(map.center_of_first_room)
+		map.recompute_fov_map(player)
+		render_all()
 	if key.vk == libtcod.KEY_ESCAPE:
 		return True		
 
@@ -60,7 +63,7 @@ while not libtcod.console_is_window_closed():
 	
 	for obj in objects:
 		obj.update(map, objects)
-	
+		
 	map.update()
 	
 	render_all()
