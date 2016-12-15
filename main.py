@@ -7,42 +7,51 @@ from Map import Map
 SCREEN_WIDTH = 80
 SCREEN_HEIGHT = 50
 
-player = Player(25, 23, '@', libtcod.white)
-npc = Object(55, 23, '@', libtcod.yellow)
-objects = [npc, player]
-
 # Set console font
 libtcod.console_set_custom_font('arial10x10.png', libtcod.FONT_LAYOUT_TCOD)
 
 # Initialize window
 libtcod.console_init_root(SCREEN_WIDTH, SCREEN_HEIGHT, 'python/libtcod tutorial', False)
 	
+FOV = True # This controls whether FOV is enabled or not	
+	
 con = libtcod.console_new(SCREEN_WIDTH, SCREEN_HEIGHT)
 map = Map(80, 50)
 
+(playerX, playerY) = map.center_of_first_room
+player = Player(playerX, playerY, '@', libtcod.white)
+npc = Object(55, 23, '@', libtcod.yellow)
+objects = [npc, player]
+
 def render_all():
 	for obj in objects:
-			obj.draw(con, map)
+			obj.draw(con, map, FOV)
 		
-	if map.fov_recompute:
-		# If the map needs to recompute the FOV map, do it once
-		map.fov_recompute = False
-		map.recompute_fov_map(player)
+	if(FOV):
+		if map.fov_recompute:
+			# If the map needs to recompute the FOV map, do it once
+			map.fov_recompute = False
+			map.recompute_fov_map(player)
 	
-	map.draw(con)
+	map.draw(con, FOV)
 		
 	# Blit contents on the 'con' console to the root console
 	libtcod.console_blit(con, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, 0, 0, 0)
 	
 	
 def handle_keys():	
+	global FOV
 	key = libtcod.console_wait_for_keypress(True)
 	if key.vk == libtcod.KEY_ENTER and key.lalt:
 		# This makes alt + enter toggle fullscreen
 		libtcod.console_set_fullscreen(not libtcod.console_is_fullscreen())
-		
+	if key.vk == libtcod.KEY_F1:
+		FOV = not FOV
+	if key.vk == libtcod.KEY_F2:
+		map.make_map()
+		player.set_position(map.center_of_first_room)
 	if key.vk == libtcod.KEY_ESCAPE:
-		return True
+		return True		
 
 # Main game loop
 while not libtcod.console_is_window_closed():
