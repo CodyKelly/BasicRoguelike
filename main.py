@@ -17,9 +17,7 @@ FOV = True # This controls whether FOV is enabled or not
 	
 con = libtcod.console_new(SCREEN_WIDTH, SCREEN_HEIGHT)
 map = Map(80, 50)
-
-(playerX, playerY) = map.center_of_first_room
-player = Player(playerX, playerY, '@', libtcod.white)
+player = Player(0, 0, '@', libtcod.white)
 npc = Object(55, 23, '@', libtcod.yellow)
 objects = [npc, player]
 
@@ -48,14 +46,20 @@ def handle_keys():
 	if key.vk == libtcod.KEY_F1:
 		FOV = not FOV
 	if key.vk == libtcod.KEY_F2:
-		map.clear(con)
-		map.make_map()
-		player.set_position(map.center_of_first_room)
-		map.recompute_fov_map(player)
-		render_all()
+		start_new_map()
 	if key.vk == libtcod.KEY_ESCAPE:
-		return True		
+		return True	
 
+def start_new_map():		
+	map.clear(con)
+	map.make_map()
+	player.set_position(map.center_of_first_room)
+	map.recompute_fov_map(player)
+	render_all()
+
+	
+start_new_map()	
+	
 # Main game loop
 while not libtcod.console_is_window_closed():
 	# Set the default console window to 'con', this is the main window

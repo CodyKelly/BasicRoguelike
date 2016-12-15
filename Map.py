@@ -46,10 +46,6 @@ class Map:
 		
 		# Tells the game if the fov map needs to be recomputed
 		self.fov_recompute = True
-		
-		# Generate map
-		self.make_map()
-		self.make_fov_map()
 				
 	def update(self):
 		if True in (libtcod.console_is_key_pressed(libtcod.KEY_UP),
