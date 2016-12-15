@@ -6,6 +6,16 @@ class Rect:
 		self.y1 = y
 		self.x2 = x + w
 		self.y2 = y + h
+	
+	def center(self):
+		centerX = (self.x1 + self.x2) / 2
+		centerY = (self.y1 + self.y2) / 2
+		return (centerX, centerY)
+		
+	def intersection(self, other):
+		# This returns true if this rectangle and the other intersects
+		return (self.x1 <= other.x2 and self.x2 >= other.x1 and
+				self.y1 <= other.y2 and self.y2 >= other.y1)
 
 class Tile:
 	def __init__(self, blocked, block_sight = None):
