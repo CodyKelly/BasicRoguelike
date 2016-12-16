@@ -87,7 +87,7 @@ class Map:
 				self.map[x][y].blocked = False
 				self.map[x][y].block_sight = False
 				
-	def make_map(self, objects):
+	def make_map(self, objects, generateMonsters):
 		# This fills the map with solid blocks to carve our rooms out of
 		self.map = [[ Tile(True)
 			for y in range(self.height) ]
@@ -144,7 +144,8 @@ class Map:
 						#first move vertically, then horizontally
 						self.create_v_tunnel(prevY, newY, prevX)
 						self.create_h_tunnel(prevX, newX, newY)
-				self.place_objects(new_room, objects)
+				if(generateMonsters):
+					self.place_objects(new_room, objects)
 				rooms.append(new_room)
 				num_rooms += 1
 		self.make_fov_map()
