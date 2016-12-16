@@ -3,7 +3,7 @@ import libtcodpy as libtcod
 
 class Player(Object):
 	def __init__(self, x, y, char, color):
-		Object.__init__(self, x, y, char, color)
+		Object.__init__(self, x, y, char, "Player", color, blocks=True)
 		
 		self.FOV_algo = 0 # Default Field Of View algorithm
 		self.FOV_light_walls = True
@@ -14,13 +14,13 @@ class Player(Object):
 		super(Player, self).update(map, objects)
 		
 		if(libtcod.console_is_key_pressed(libtcod.KEY_UP)):
-			self.move(0, -1)
+			self.move(map, objects, 0, -1)
 	
 		if(libtcod.console_is_key_pressed(libtcod.KEY_DOWN)):
-			self.move(0, 1)
+			self.move(map, objects, 0, 1)
 		
 		if(libtcod.console_is_key_pressed(libtcod.KEY_LEFT)):
-			self.move(-1, 0)
+			self.move(map, objects, -1, 0)
 		
 		if(libtcod.console_is_key_pressed(libtcod.KEY_RIGHT)):
-			self.move(1, 0)
+			self.move(map, objects, 1, 0)

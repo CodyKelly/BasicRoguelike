@@ -18,8 +18,7 @@ FOV = True # This controls whether FOV is enabled or not
 con = libtcod.console_new(SCREEN_WIDTH, SCREEN_HEIGHT)
 map = Map(80, 50)
 player = Player(0, 0, '@', libtcod.white)
-npc = Object(55, 23, '@', libtcod.yellow)
-objects = [npc, player]
+objects = [player]
 
 def render_all():
 	for obj in objects:
@@ -51,8 +50,10 @@ def handle_keys():
 		return True	
 
 def start_new_map():		
+	del objects[:]
+	objects.append(player)
 	map.clear(con)
-	map.make_map()
+	map.make_map(objects)
 	player.set_position(map.center_of_first_room)
 	map.recompute_fov_map(player)
 	render_all()
