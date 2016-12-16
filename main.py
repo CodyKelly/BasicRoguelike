@@ -14,6 +14,7 @@ libtcod.console_set_custom_font('arial10x10.png', libtcod.FONT_LAYOUT_TCOD)
 libtcod.console_init_root(SCREEN_WIDTH, SCREEN_HEIGHT, 'python/libtcod tutorial', False)
 	
 FOV = True # This controls whether FOV is enabled or not	
+generateMonsters = True
 	
 con = libtcod.console_new(SCREEN_WIDTH, SCREEN_HEIGHT)
 map = Map(80, 50)
@@ -22,7 +23,7 @@ objects = [player]
 
 def render_all():
 	for obj in objects:
-			obj.draw(con, map, FOV)
+		obj.draw(con, map, FOV)
 		
 	if(FOV):
 		if map.fov_recompute:
@@ -37,30 +38,37 @@ def render_all():
 	
 	
 def handle_keys():	
-	global FOV
+	global FOV, generateMonsters
 	key = libtcod.console_wait_for_keypress(True)
 	if key.vk == libtcod.KEY_ENTER and key.lalt:
 		# This makes alt + enter toggle fullscreen
 		libtcod.console_set_fullscreen(not libtcod.console_is_fullscreen())
-	if key.vk == libtcod.KEY_F1:
+	elif key.vk == libtcod.KEY_F1:
 		FOV = not FOV
-	if key.vk == libtcod.KEY_F2:
+		print("FOV: " + str(FOV))
+	elif key.vk == libtcod.KEY_F2:
+		generateMonsters = not generateMonsters
+		print("Generate monsters = " + str(generateMonsters))
+	elif key.c == ord('r'):
 		start_new_map()
-	if key.vk == libtcod.KEY_ESCAPE:
-		return True	
+	elif key.vk == libtcod.KEY_ESCAPE:
+		return "exit"	
+	return player.get_input(map, objects)
 
 def start_new_map():		
 	del objects[:]
 	objects.append(player)
 	map.clear(con)
-	map.make_map(objects)
+	map.make_map(objects, generateMonsters)
 	player.set_position(map.center_of_first_room)
 	map.recompute_fov_map(player)
 	render_all()
 
 	
 start_new_map()	
-	
+game_state = "playing"
+player_action = None
+
 # Main game loop
 while not libtcod.console_is_window_closed():
 	# Set the default console window to 'con', this is the main window
@@ -68,7 +76,7 @@ while not libtcod.console_is_window_closed():
 	
 	for obj in objects:
 		obj.update(map, objects)
-		
+	
 	map.update()
 	
 	render_all()
@@ -79,6 +87,7 @@ while not libtcod.console_is_window_closed():
 	for obj in objects:
 		obj.clear(con)
 	
-	exit = handle_keys()
-	if exit:
+	player_action = handle_keys()
+	
+	if player_action == "exit":
 		break

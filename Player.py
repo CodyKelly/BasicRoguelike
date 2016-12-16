@@ -12,15 +12,18 @@ class Player(Object):
 	
 	def update(self, map, objects):
 		super(Player, self).update(map, objects)
-		
+	
+	def get_input(self, map, objects):
 		if(libtcod.console_is_key_pressed(libtcod.KEY_UP)):
 			self.move(map, objects, 0, -1)
 	
-		if(libtcod.console_is_key_pressed(libtcod.KEY_DOWN)):
+		elif(libtcod.console_is_key_pressed(libtcod.KEY_DOWN)):
 			self.move(map, objects, 0, 1)
 		
-		if(libtcod.console_is_key_pressed(libtcod.KEY_LEFT)):
+		elif(libtcod.console_is_key_pressed(libtcod.KEY_LEFT)):
 			self.move(map, objects, -1, 0)
 		
-		if(libtcod.console_is_key_pressed(libtcod.KEY_RIGHT)):
+		elif(libtcod.console_is_key_pressed(libtcod.KEY_RIGHT)):
 			self.move(map, objects, 1, 0)
+		
+		return "didnt-take-turn"
