@@ -1,4 +1,5 @@
 import libtcodpy as libtcod
+from Object import Object
 
 class Rect:
 	def __init__(self, x, y, w, h):
@@ -43,6 +44,7 @@ class Map:
 		self.room_min_size = 6
 		self.max_rooms = 30
 		self.center_of_first_room = (0, 0) # This will be changed when dungeon is generated
+		self.max_room_monsters = 6
 		
 		# Tells the game if the fov map needs to be recomputed
 		self.fov_recompute = True
@@ -85,7 +87,7 @@ class Map:
 				self.map[x][y].blocked = False
 				self.map[x][y].block_sight = False
 				
-	def make_map(self):
+	def make_map(self, objects):
 		# This fills the map with solid blocks to carve our rooms out of
 		self.map = [[ Tile(True)
 			for y in range(self.height) ]
@@ -142,7 +144,7 @@ class Map:
 						#first move vertically, then horizontally
 						self.create_v_tunnel(prevY, newY, prevX)
 						self.create_h_tunnel(prevX, newX, newY)
-				
+				self.place_objects(new_room, objects)
 				rooms.append(new_room)
 				num_rooms += 1
 		self.make_fov_map()
@@ -172,3 +174,23 @@ class Map:
 		for y in range(self.height):
 			for x in range(self.width):
 				libtcod.console_set_char_background(con, x, y, libtcod.black, libtcod.BKGND_SET)
+				
+	def place_objects(self, room, objects):
+		# Choose random number of monsters
+		num_monsters = libtcod.random_get_int(0, 0, self.max_room_monsters)
+		
+		for i in range(num_monsters):
+			# Choose a random spot for this monster
+			x = libtcod.random_get_int(0, room.x1 + 1, room.x2 - 1)
+			y = libtcod.random_get_int(0, room.y1 + 1, room.y2 - 1)
+			
+			if libtcod.random_get_int(0, 0, 100) < 80:	# 80% chance of getting an orc
+				# Create and orc
+				monster = Object(x, y, 'o', "Orc", libtcod.desaturated_green, blocks=True)
+			else:
+				# Create a troll
+				monster = Object(x, y, 'T', "Troll", libtcod.darker_green, blocks=True)
+			if not monster.is_blocked(self, objects, x, y):
+				objects.append(monster)
+			else:
+				print("Monster blocked at: (" + str(x) + ", " + str(y) + ")")
