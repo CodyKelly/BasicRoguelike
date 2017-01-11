@@ -1,14 +1,29 @@
 import libtcodpy as libtcod
 
+################################################################################
+#                               GLOBAL VARIABLES                               #
+#           Variables here will be accessible throughout the program           #
+################################################################################
+
 # Window dimensions
 SCREEN_WIDTH = 80
 SCREEN_HEIGHT = 50
+
+# Map dimensions
+MAP_WIDTH = 80
+MAP_HEIGHT = 50
+
+FOV = True # Is Field of View enabled?	
+generateMonsters = True # Is the game generating monsters upon level creation?
 
 # Set console font
 libtcod.console_set_custom_font('arial10x10.png', libtcod.FONT_LAYOUT_TCOD)
 
 # Initialize window
 libtcod.console_init_root(SCREEN_WIDTH, SCREEN_HEIGHT, 'python/libtcod tutorial', False)
+
+# This list hold all objects in the game
+objects = []
 
 def render_all():
 	if(FOV):
@@ -18,16 +33,15 @@ def render_all():
 			map.recompute_fov_map(player)
 			
 	for obj in objects:
-		obj.draw(con, map, FOV)
+		obj.draw()
 	
-	map.draw(con, FOV)
+	map.draw()
 		
 	# Blit contents on the 'con' console to the root console
 	libtcod.console_blit(con, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, 0, 0, 0)
 	
-	
 def handle_keys():	
-	global FOV, generateMonsters
+	global FOV, generateMonsters, player, map, objects, game_state, player_action, con
 	key = libtcod.console_wait_for_keypress(True)
 	if key.vk == libtcod.KEY_ENTER and key.lalt:
 		# This makes alt + enter toggle fullscreen
@@ -39,19 +53,19 @@ def handle_keys():
 		generateMonsters = not generateMonsters
 		print("Generate monsters = " + str(generateMonsters))
 	elif key.c == ord('r'):
-		start_new_map()
+		con = libtcod.console_new(SCREEN_WIDTH, SCREEN_HEIGHT)
+		
+		objects = []
+		map = Map()
+
+		player = Player(map.center_of_first_room[0], map.center_of_first_room[1], '@', libtcod.white)
+		objects.append(player)
+	
+		game_state = "playing"
+		player_action = None
 	elif key.vk == libtcod.KEY_ESCAPE:
 		return "exit"	
-	return player.get_input(map, objects)
-
-def start_new_map():		
-	del objects[:]
-	objects.append(player)
-	map.clear(con)
-	map.make_map(objects, generateMonsters)
-	player.set_position(map.center_of_first_room)
-	map.recompute_fov_map(player)
-	render_all()
+	return player.get_input()
 
 class Rect:
 	def __init__(self, x, y, w, h):
@@ -80,11 +94,7 @@ class Tile:
 		self.block_sight = block_sight
 
 class Map:
-	def __init__(self, width, height):
-		# Width and height of map, in tiles
-		self.width = width
-		self.height = height
-		
+	def __init__(self):
 		# Tile colors
 		self.color_dark_wall = libtcod.Color(0, 0, 100)
 		self.color_light_wall = libtcod.Color(130, 110, 50)
@@ -100,6 +110,9 @@ class Map:
 		
 		# Tells the game if the fov map needs to be recomputed
 		self.fov_recompute = True
+		
+		self.make_map()
+		self.make_fov_map()
 				
 	def update(self):
 		if True in (libtcod.console_is_key_pressed(libtcod.KEY_UP),
@@ -108,9 +121,9 @@ class Map:
 		libtcod.console_is_key_pressed(libtcod.KEY_RIGHT)):
 			self.fov_recompute = True
 				
-	def draw(self, con, FOV):
-		for y in range(self.height):
-			for x in range(self.width):
+	def draw(self):
+		for y in range(MAP_HEIGHT):
+			for x in range(MAP_WIDTH):
 				if(FOV):
 					visible = libtcod.map_is_in_fov(self.fov_map, x, y)
 				else:
@@ -139,11 +152,11 @@ class Map:
 				self.map[x][y].blocked = False
 				self.map[x][y].block_sight = False
 				
-	def make_map(self, objects, generateMonsters):
+	def make_map(self):
 		# This fills the map with solid blocks to carve our rooms out of
 		self.map = [[ Tile(True)
-			for y in range(self.height) ]
-				for x in range(self.width) ]
+			for y in range(MAP_HEIGHT) ]
+				for x in range(MAP_WIDTH) ]
 				
 		rooms = []
 		num_rooms = 0
@@ -156,8 +169,8 @@ class Map:
 			h = libtcod.random_get_int(0, self.room_min_size, self.room_max_size)
 			
 			# Get a random position within the boundaries of the map
-			x = libtcod.random_get_int(0, 0, self.width - w - 1)
-			y = libtcod.random_get_int(0, 0, self.height - h - 1)
+			x = libtcod.random_get_int(0, 0, MAP_WIDTH - w - 1)
+			y = libtcod.random_get_int(0, 0, MAP_HEIGHT - h - 1)
 		
 			new_room = Rect(x, y, w, h)
 			
@@ -203,10 +216,10 @@ class Map:
 		self.make_fov_map()
 		
 	def make_fov_map(self):
-		self.fov_map = libtcod.map_new(self.width, self.height)
+		self.fov_map = libtcod.map_new(MAP_WIDTH, MAP_HEIGHT)
 		
-		for y in range(self.height):
-			for x in range(self.width):
+		for y in range(MAP_HEIGHT):
+			for x in range(MAP_WIDTH):
 				libtcod.map_set_properties(self.fov_map, x, y, not self.map[x][y].block_sight, not self.map[x][y].blocked)
 	
 	def create_h_tunnel(self, x1, x2, y):
@@ -224,8 +237,8 @@ class Map:
 		
 	def clear(self, con):
 		self.map = []
-		for y in range(self.height):
-			for x in range(self.width):
+		for y in range(MAP_HEIGHT):
+			for x in range(MAP_WIDTH):
 				libtcod.console_set_char_background(con, x, y, libtcod.black, libtcod.BKGND_SET)
 				
 	def place_objects(self, room, objects):
@@ -268,7 +281,7 @@ class Object(object):
 		except IndexError:
 			print("Trying to go out of map bounds at (" + str(self.x) + ", " + str(self.y) + ")")
 		
-	def draw(self, con, map, FOV):
+	def draw(self):
 		# Draws the object's character from the screen
 		if(FOV):
 			if libtcod.map_is_in_fov(map.fov_map, self.x, self.y):
@@ -281,8 +294,7 @@ class Object(object):
 		# Erases the object's character from the screen
 		libtcod.console_put_char(con, self.x, self.y, ' ', libtcod.BKGND_NONE)
 		
-	def update(self, map, objects):
-		self.map = map
+	def update(self):
 		pass
 	
 	def set_position(self, newPosition):
@@ -313,10 +325,10 @@ class Player(Object):
 		
 		self.view_radius = 10
 	
-	def update(self, map, objects):
-		super(Player, self).update(map, objects)
+	def update(self):
+		super(Player, self).update()
 	
-	def get_input(self, map, objects):
+	def get_input(self):
 		if(libtcod.console_is_key_pressed(libtcod.KEY_UP)):
 			self.move(map, objects, 0, -1)
 	
@@ -331,25 +343,31 @@ class Player(Object):
 		
 		return "didnt-take-turn"
 	
-FOV = True # This controls whether FOV is enabled or not	
-generateMonsters = True
-	
+################################################################################
+#                                INITIALIZATION                                #
+#        Things that need to be loaded at the start of the game go here        #
+################################################################################
 con = libtcod.console_new(SCREEN_WIDTH, SCREEN_HEIGHT)
-map = Map(80, 50)
-player = Player(0, 0, '@', libtcod.white)
-objects = [player]
+
+map = Map()
+
+player = Player(map.center_of_first_room[0], map.center_of_first_room[1], '@', libtcod.white)
+objects.append(player)
 	
-start_new_map()	
 game_state = "playing"
 player_action = None
 
-# Main game loop
+################################################################################
+#                                MAIN GAME LOOP                                #
+#         Things here are repeated every time the player takes a turn          #
+################################################################################
+
 while not libtcod.console_is_window_closed():
 	# Set the default console window to 'con', this is the main window
 	libtcod.console_set_default_foreground(0, libtcod.white)
 	
 	for obj in objects:
-		obj.update(map, objects)
+		obj.update()
 	
 	map.update()
 	
