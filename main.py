@@ -1,4 +1,6 @@
 import libtcodpy as libtcod
+import Components
+import math
 
 ################################################################################
 #                               GLOBAL VARIABLES                               #
@@ -17,7 +19,7 @@ FOV = True # Is Field of View enabled?
 generateMonsters = True # Is the game generating monsters upon level creation?
 
 # Set console font
-libtcod.console_set_custom_font('arial10x10.png', libtcod.FONT_LAYOUT_TCOD)
+libtcod.console_set_custom_font('arial12x12.png', libtcod.FONT_LAYOUT_TCOD)
 
 # Initialize window
 libtcod.console_init_root(SCREEN_WIDTH, SCREEN_HEIGHT, 'python/libtcod tutorial', False)
@@ -25,24 +27,51 @@ libtcod.console_init_root(SCREEN_WIDTH, SCREEN_HEIGHT, 'python/libtcod tutorial'
 # This list hold all objects in the game
 objects = []
 
+def player_death(player):
+	global game_state
+	print "You died!"
+	game_state = "dead"
+	
+	player.char = '%'
+	player.color = libtcod.dark_red
+
+def monster_death(monster):
+	print monster.name.capitalize() + " is dead!"
+	monster.char = '%'
+	monster.color = libtcod.dark_red
+	monster.blocks = False
+	monster.fighter = None
+	monster.ai = None
+	monster.name = "Remains of " + monster.name
+	monster.send_to_back()
+
 def render_all():
 	if(FOV):
-		if map.fov_recompute:
+		if gameMap.fov_recompute:
 			# If the map needs to recompute the FOV map, do it once
-			map.fov_recompute = False
-			map.recompute_fov_map(player)
+			gameMap.fov_recompute = False
+			gameMap.recompute_fov_map(player)
 			
 	for obj in objects:
-		obj.draw()
+		if obj != player:
+			obj.draw()
+	player.draw()
 	
-	map.draw()
+	gameMap.draw()
 		
 	# Blit contents on the 'con' console to the root console
 	libtcod.console_blit(con, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, 0, 0, 0)
 	
+	# Show the player's stats
+	libtcod.console_set_default_background(con, libtcod.white)
+	libtcod.console_print_ex(con, 1, SCREEN_HEIGHT - 2, libtcod.BKGND_NONE, libtcod.LEFT,
+		"HP: " + str(player.fighter.hp) + "/" + str(player.fighter.max_hp) + "      ")
+	
 def handle_keys():	
-	global FOV, generateMonsters, player, map, objects, game_state, player_action, con
+	global FOV, generateMonsters, player, gameMap, objects, game_state, player_action, con
+	
 	key = libtcod.console_wait_for_keypress(True)
+	
 	if key.vk == libtcod.KEY_ENTER and key.lalt:
 		# This makes alt + enter toggle fullscreen
 		libtcod.console_set_fullscreen(not libtcod.console_is_fullscreen())
@@ -56,18 +85,20 @@ def handle_keys():
 		con = libtcod.console_new(SCREEN_WIDTH, SCREEN_HEIGHT)
 		
 		objects = []
-		map = Map()
-
-		player = Player(map.center_of_first_room[0], map.center_of_first_room[1], '@', libtcod.white)
+		
+		gameMap = GameMap()
+		gameMap.make_map()
+		gameMap.make_fov_map()
+		player = Player(gameMap.center_of_first_room[0], gameMap.center_of_first_room[1], '@', libtcod.white)
 		objects.append(player)
-	
-		game_state = "playing"
-		player_action = None
+		
+		return "restart"
 	elif key.vk == libtcod.KEY_ESCAPE:
 		return "exit"	
-	return player.get_input()
+	if game_state == "playing":
+		return player.get_input()
 
-class Rect:
+class Rect(object):
 	def __init__(self, x, y, w, h):
 		self.x1 = x
 		self.y1 = y
@@ -84,7 +115,7 @@ class Rect:
 		return (self.x1 <= other.x2 and self.x2 >= other.x1 and
 				self.y1 <= other.y2 and self.y2 >= other.y1)
 
-class Tile:
+class Tile(object):
 	def __init__(self, blocked, block_sight = None):
 		self.blocked = blocked
 		self.explored = False
@@ -93,7 +124,7 @@ class Tile:
 		if block_sight is None: block_sight = blocked
 		self.block_sight = block_sight
 
-class Map:
+class GameMap(object):
 	def __init__(self):
 		# Tile colors
 		self.color_dark_wall = libtcod.Color(0, 0, 100)
@@ -110,9 +141,6 @@ class Map:
 		
 		# Tells the game if the fov map needs to be recomputed
 		self.fov_recompute = True
-		
-		self.make_map()
-		self.make_fov_map()
 				
 	def update(self):
 		if True in (libtcod.console_is_key_pressed(libtcod.KEY_UP),
@@ -252,11 +280,18 @@ class Map:
 			
 			if libtcod.random_get_int(0, 0, 100) < 80:	# 80% chance of getting an orc
 				# Create and orc
-				monster = Object(x, y, 'o', "Orc", libtcod.desaturated_green, blocks=True)
+				fighter_component = Components.Fighter(hp = 10, defense = 0, power = 3, death_function=monster_death)
+				ai_component = Components.BasicMonster()
+				
+				monster = Object(x, y, 'o', "Orc", libtcod.desaturated_green, blocks=True, fighter = fighter_component, ai = ai_component)
 			else:
 				# Create a troll
-				monster = Object(x, y, 'T', "Troll", libtcod.darker_green, blocks=True)
-			if not monster.is_blocked(self, objects, x, y):
+				fighter_component = Components.Fighter(hp = 16, defense = 1, power = 4, death_function=monster_death)
+				ai_component = Components.BasicMonster()
+				
+				monster = Object(x, y, 'T', "Troll", libtcod.darker_green, blocks=True, fighter = fighter_component, ai = ai_component)
+				
+			if not monster.is_blocked(x, y):
 				objects.append(monster)
 			else:
 				print("Monster blocked at: (" + str(x) + ", " + str(y) + ")")
@@ -264,18 +299,24 @@ class Map:
 class Object(object):
 # This object class represents every visible object on the screen,
 # shown with a character
-	def __init__(self, x, y, char, name, color, blocks = False):
+	def __init__(self, x, y, char, name, color, blocks = False, fighter = None, ai = None):
 		self.name = name
 		self.blocks = blocks
 		self.x = x
 		self.y = y
 		self.char = char
 		self.color = color
+		self.fighter = fighter
+		if self.fighter:
+			self.fighter.owner = self
+		self.ai = ai
+		if self.ai:
+			self.ai.owner = self
 		
-	def move(self, map, objects, dx, dy):
+	def move(self, dx, dy):
 		# Moves the object by the given amount
 		try:
-			if not self.is_blocked(map, objects, self.x + dx, self.y + dy):
+			if not self.is_blocked(self.x + dx, self.y + dy):
 				self.x += dx
 				self.y += dy
 		except IndexError:
@@ -284,7 +325,7 @@ class Object(object):
 	def draw(self):
 		# Draws the object's character from the screen
 		if(FOV):
-			if libtcod.map_is_in_fov(map.fov_map, self.x, self.y):
+			if libtcod.map_is_in_fov(gameMap.fov_map, self.x, self.y):
 				libtcod.console_set_default_foreground(con, self.color)
 				libtcod.console_put_char(con, self.x, self.y, self.char, libtcod.BKGND_NONE)
 		else:
@@ -304,9 +345,9 @@ class Object(object):
 	def get_position(self):
 		return (self.x, self.y)
 		
-	def is_blocked(self, map, objects, x, y):
+	def is_blocked(self, x, y):
 		# First test the map tile
-		if map.map[x][y].blocked:
+		if gameMap.map[x][y].blocked:
 			return True
 		
 		# Now we check for any blocking objects
@@ -315,10 +356,41 @@ class Object(object):
 				return True
 		
 		return False
+	
+	def move_towards(self, target_x, target_y):
+		dx = target_x - self.x
+		dy = target_y - self.y
+		
+		distance = math.sqrt(dx ** 2 + dy ** 2)
+		
+		dx = int(round(dx / distance))
+		dy = int(round(dy / distance))
+		
+		self.move(dx, dy)
+	
+	def distance_to(self, other):
+		# Returns the distance to another object
+		dx = other.x - self.x
+		dy = other.y - self.y
+		
+		return math.sqrt(dx ** 2 + dy ** 2)
+	
+	def get_fov_map(self):
+		return gameMap.fov_map
+	
+	def get_player(self):
+		return player
+	
+	def send_to_back(self):
+		# This method makes this object draw first, so other objects are drawn
+		# on top of it.
+		global objects
+		objects.remove(self)
+		objects.insert(0, self)
 
 class Player(Object):
-	def __init__(self, x, y, char, color):
-		Object.__init__(self, x, y, char, "Player", color, blocks=True)
+	def __init__(self, x, y, char, color, fighter):
+		Object.__init__(self, x, y, char, "Player", color, blocks=True, fighter = fighter)
 		
 		self.FOV_algo = 0 # Default Field Of View algorithm
 		self.FOV_light_walls = True
@@ -328,20 +400,42 @@ class Player(Object):
 	def update(self):
 		super(Player, self).update()
 	
+	def move_or_attack(self, dx, dy):
+		global fov_recompute
+		
+		# Calculate the coordinates the player is moving or attacking to
+		x = self.x + dx
+		y = self.y + dy
+		
+		# Detect any attackable object
+		target = None
+		for object in objects:
+			if object.fighter and object.x == x and object.y == y:
+				target = object
+				break
+		
+		# If a target is found, attack, otherwise, move
+		if target is not None:
+			self.fighter.attack(target)
+		else:
+			player.move(dx, dy)
+			fov_recompute = True
+	
 	def get_input(self):
+		
 		if(libtcod.console_is_key_pressed(libtcod.KEY_UP)):
-			self.move(map, objects, 0, -1)
+			self.move_or_attack(0, -1)
 	
 		elif(libtcod.console_is_key_pressed(libtcod.KEY_DOWN)):
-			self.move(map, objects, 0, 1)
+			self.move_or_attack(0, 1)
 		
 		elif(libtcod.console_is_key_pressed(libtcod.KEY_LEFT)):
-			self.move(map, objects, -1, 0)
+			self.move_or_attack(-1, 0)
 		
 		elif(libtcod.console_is_key_pressed(libtcod.KEY_RIGHT)):
-			self.move(map, objects, 1, 0)
-		
-		return "didnt-take-turn"
+			self.move_or_attack(1, 0)
+		else:
+			return "didnt-take-turn"
 	
 ################################################################################
 #                                INITIALIZATION                                #
@@ -349,9 +443,13 @@ class Player(Object):
 ################################################################################
 con = libtcod.console_new(SCREEN_WIDTH, SCREEN_HEIGHT)
 
-map = Map()
+gameMap = GameMap()
+gameMap.make_map()
+gameMap.make_fov_map()
 
-player = Player(map.center_of_first_room[0], map.center_of_first_room[1], '@', libtcod.white)
+fighter_component = Components.Fighter(hp = 30, defense = 2, power = 5, death_function=player_death)
+player = Player(gameMap.center_of_first_room[0], gameMap.center_of_first_room[1], '@', libtcod.white, fighter = fighter_component)
+
 objects.append(player)
 	
 game_state = "playing"
@@ -369,7 +467,7 @@ while not libtcod.console_is_window_closed():
 	for obj in objects:
 		obj.update()
 	
-	map.update()
+	gameMap.update()
 	
 	render_all()
 	
@@ -383,3 +481,8 @@ while not libtcod.console_is_window_closed():
 	
 	if player_action == "exit":
 		break
+		
+	if game_state == "playing":
+		for obj in objects:
+			if obj.ai:
+				obj.ai.take_turn()
