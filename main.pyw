@@ -1,11 +1,14 @@
 import libtcodpy as libtcod
-import Components
 import math
+import textwrap
 
 ################################################################################
 #                               GLOBAL VARIABLES                               #
 #           Variables here will be accessible throughout the program           #
 ################################################################################
+
+# FPS limit
+LIMIT_FPS = 60
 
 # Window dimensions
 SCREEN_WIDTH = 80
@@ -13,7 +16,15 @@ SCREEN_HEIGHT = 50
 
 # Map dimensions
 MAP_WIDTH = 80
-MAP_HEIGHT = 50
+MAP_HEIGHT = 43
+
+# Sizes and position of the gui
+BAR_WIDTH = 20
+PANEL_HEIGHT = 7
+PANEL_Y = SCREEN_HEIGHT - PANEL_HEIGHT
+MSG_X = BAR_WIDTH + 2
+MSG_WIDTH = SCREEN_WIDTH - BAR_WIDTH - 2
+MSG_HEIGHT = PANEL_HEIGHT - 1
 
 FOV = True # Is Field of View enabled?	
 generateMonsters = True # Is the game generating monsters upon level creation?
@@ -24,27 +35,62 @@ libtcod.console_set_custom_font('arial12x12.png', libtcod.FONT_LAYOUT_TCOD)
 # Initialize window
 libtcod.console_init_root(SCREEN_WIDTH, SCREEN_HEIGHT, 'python/libtcod tutorial', False)
 
-# This list hold all objects in the game
+# This list holds all objects in the game
 objects = []
+
+# This list holds all the GUI messages for the player
+game_msgs = []
 
 def player_death(player):
 	global game_state
-	print "You died!"
+	message("You died!", libtcod.light_red)
 	game_state = "dead"
 	
 	player.char = '%'
 	player.color = libtcod.dark_red
 
 def monster_death(monster):
-	print monster.name.capitalize() + " is dead!"
+	message(monster.name.capitalize() + " is dead!", libtcod.light_blue)
 	monster.char = '%'
 	monster.color = libtcod.dark_red
 	monster.blocks = False
-	monster.fighter = None
-	monster.ai = None
+	monster.remove_component("Fighter")
+	monster.remove_component("BasicMonster")
 	monster.name = "Remains of " + monster.name
 	monster.send_to_back()
 
+def message(new_msg, color = libtcod.white):
+	# First we'll split the message if necessary into multiple lines (text wrapping)
+	new_msg_lines = textwrap.wrap(new_msg, MSG_WIDTH)
+	
+	for line in new_msg_lines:
+		# If the buffer is full, remove the first line to make room for the
+		# new line.
+		if len(game_msgs) == MSG_HEIGHT:
+			del game_msgs[0]
+		
+		# Add the new line as a tuple, with the text and the color
+		game_msgs.append((line, color))
+	
+def render_bar(x, y, total_width, name, value, maximum, bar_color, back_color):
+	# Renders a status bar (for HP, experience points, etc.)
+	
+	# First we'll calculate the width of the bar
+	bar_width = int(float(value) / maximum * total_width)
+	
+	# Then we'll render the background
+	libtcod.console_set_default_background(panel, back_color)
+	libtcod.console_rect(panel, x, y, total_width, 1, False, libtcod.BKGND_SCREEN)
+	
+	# Now we render the bar on top of the background
+	libtcod.console_set_default_background(panel, back_color)
+	if bar_width > 0:
+		libtcod.console_rect(panel, x, y, bar_width, 1, False, libtcod.BKGND_SCREEN)
+		
+	# And now we'll put some text above the bar, displaying the actual values
+	libtcod.console_set_default_foreground(panel, libtcod.white)
+	libtcod.console_print_ex(panel, x + total_width / 2, y, libtcod.BKGND_NONE, libtcod.CENTER, "{0}: {1}/{2}".format(name, value, maximum))
+	
 def render_all():
 	if(FOV):
 		if gameMap.fov_recompute:
@@ -60,44 +106,115 @@ def render_all():
 	gameMap.draw()
 		
 	# Blit contents on the 'con' console to the root console
-	libtcod.console_blit(con, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, 0, 0, 0)
+	libtcod.console_blit(con, 0, 0, MAP_WIDTH, MAP_HEIGHT, 0, 0, 0)
+	
+	# Prepare the gui panel for rendering
+	libtcod.console_set_default_background(panel, libtcod.black)
+	libtcod.console_clear(panel)
+	
+	# First we'll render the log messages
+	y = 1
+	for (line, color) in game_msgs:
+		libtcod.console_set_default_foreground(panel, color)
+		libtcod.console_print_ex(panel, MSG_X, y, libtcod.BKGND_NONE, libtcod.LEFT, line)
+		y += 1
 	
 	# Show the player's stats
-	libtcod.console_set_default_background(con, libtcod.white)
-	libtcod.console_print_ex(con, 1, SCREEN_HEIGHT - 2, libtcod.BKGND_NONE, libtcod.LEFT,
-		"HP: " + str(player.fighter.hp) + "/" + str(player.fighter.max_hp) + "      ")
+	render_bar(1, 1, BAR_WIDTH, "HP", player.get_component("Fighter").hp, player.get_component("Fighter").max_hp, libtcod.light_red, libtcod.darker_red)
+	
+	# Display the names of objects under the mouse
+	libtcod.console_set_default_foreground(panel, libtcod.light_grey)
+	libtcod.console_print_ex(panel, 1, 0, libtcod.BKGND_NONE, libtcod.LEFT, get_names_under_mouse())
+	
+	# Blit the contents of "panel" to the root console
+	libtcod.console_blit(panel, 0, 0, SCREEN_WIDTH, PANEL_HEIGHT, 0, 0, PANEL_Y)
+	
+def get_names_under_mouse():
+	global mouse
+	
+	# Return a string with the names of all the objects under the mouse
+	(x, y) = (mouse.cx, mouse.cy)
+	
+	# Create a list with the names of all objects at the mouse's coordinates and in the FOV
+	names = [obj.name for obj in objects if obj.x == x and obj.y == y and libtcod.map_is_in_fov(gameMap.fov_map, obj.x, obj.y)]
+	
+	names = ', '.join(names) # Joins all the names together, seperated by commas
+	
+	return names.capitalize()
 	
 def handle_keys():	
-	global FOV, generateMonsters, player, gameMap, objects, game_state, player_action, con
-	
-	key = libtcod.console_wait_for_keypress(True)
-	
+	global FOV, generateMonsters, player, game_state, key
+		
 	if key.vk == libtcod.KEY_ENTER and key.lalt:
 		# This makes alt + enter toggle fullscreen
 		libtcod.console_set_fullscreen(not libtcod.console_is_fullscreen())
 	elif key.vk == libtcod.KEY_F1:
 		FOV = not FOV
-		print("FOV: " + str(FOV))
 	elif key.vk == libtcod.KEY_F2:
 		generateMonsters = not generateMonsters
-		print("Generate monsters = " + str(generateMonsters))
-	elif key.c == ord('r'):
-		con = libtcod.console_new(SCREEN_WIDTH, SCREEN_HEIGHT)
-		
-		objects = []
-		
-		gameMap = GameMap()
-		gameMap.make_map()
-		gameMap.make_fov_map()
-		player = Player(gameMap.center_of_first_room[0], gameMap.center_of_first_room[1], '@', libtcod.white)
-		objects.append(player)
-		
-		return "restart"
 	elif key.vk == libtcod.KEY_ESCAPE:
 		return "exit"	
 	if game_state == "playing":
 		return player.get_input()
+		
+class Component:
+	def __init__(self, name):
+		self.name = name
+	
+	def update(self):
+		pass
 
+class Fighter(Component):
+	# Combat-related properties and methods
+	def __init__(self, hp, defense, power, death_function=None):
+		Component.__init__(self, "Fighter")
+		self.max_hp = hp
+		self.hp = hp
+		self.defense = defense
+		self.power = power
+		self.death_function = death_function
+		
+	def take_damage(self, damage):
+		# Apply damage
+		if damage > 0:
+			self.hp -= damage
+		
+		if self.hp <= 0:
+			self.hp = 0
+			function = self.death_function
+			if function is not None:
+				function(self.owner)
+			
+	def attack(self, target):
+		damage = self.power - target.get_component("Fighter").defense
+		
+		if damage > 0:
+			# Make the target take damage
+			color = libtcod.light_red
+			if(self.owner == player):
+				color = libtcod.light_blue
+			message(self.owner.name.capitalize() + " attacks " + target.name + " for " + str(damage) + " hit points.", color)
+				
+			target.get_component("Fighter").take_damage(damage)
+		else:
+			print self.owner.name.capitalize() + " attacks " + target.name + " but it has no effect!"
+
+class BasicMonster(Component):
+	def __init__(self):
+		Component.__init__(self, "BasicMonster")
+	# AI for a monster
+	def update(self):
+		monster = self.owner
+		player = monster.get_player()
+		
+		if libtcod.map_is_in_fov(monster.get_fov_map(), monster.x, monster.y):
+		
+			if monster.distance_to(player) >= 2:
+				monster.move_towards(player.x, player.y)
+			
+			elif player.get_component("Fighter").hp > 0:
+				monster.get_component("Fighter").attack(player)		
+				
 class Rect(object):
 	def __init__(self, x, y, w, h):
 		self.x1 = x
@@ -141,13 +258,6 @@ class GameMap(object):
 		
 		# Tells the game if the fov map needs to be recomputed
 		self.fov_recompute = True
-				
-	def update(self):
-		if True in (libtcod.console_is_key_pressed(libtcod.KEY_UP),
-		libtcod.console_is_key_pressed(libtcod.KEY_DOWN),
-		libtcod.console_is_key_pressed(libtcod.KEY_LEFT),
-		libtcod.console_is_key_pressed(libtcod.KEY_RIGHT)):
-			self.fov_recompute = True
 				
 	def draw(self):
 		for y in range(MAP_HEIGHT):
@@ -280,47 +390,39 @@ class GameMap(object):
 			
 			if libtcod.random_get_int(0, 0, 100) < 80:	# 80% chance of getting an orc
 				# Create and orc
-				fighter_component = Components.Fighter(hp = 10, defense = 0, power = 3, death_function=monster_death)
-				ai_component = Components.BasicMonster()
+				fighter_component = Fighter(hp = 10, defense = 0, power = 3, death_function=monster_death)
+				ai_component = BasicMonster()
 				
-				monster = Object(x, y, 'o', "Orc", libtcod.desaturated_green, blocks=True, fighter = fighter_component, ai = ai_component)
+				monster = Object(x, y, 'o', "Orc", libtcod.desaturated_green, blocks=True, components=[fighter_component, ai_component])
 			else:
 				# Create a troll
-				fighter_component = Components.Fighter(hp = 16, defense = 1, power = 4, death_function=monster_death)
-				ai_component = Components.BasicMonster()
+				fighter_component = Fighter(hp = 16, defense = 1, power = 4, death_function=monster_death)
+				ai_component = BasicMonster()
 				
-				monster = Object(x, y, 'T', "Troll", libtcod.darker_green, blocks=True, fighter = fighter_component, ai = ai_component)
+				monster = Object(x, y, 'T', "Troll", libtcod.darker_green, blocks=True, components=[fighter_component, ai_component])
 				
 			if not monster.is_blocked(x, y):
 				objects.append(monster)
-			else:
-				print("Monster blocked at: (" + str(x) + ", " + str(y) + ")")
 				
 class Object(object):
 # This object class represents every visible object on the screen,
 # shown with a character
-	def __init__(self, x, y, char, name, color, blocks = False, fighter = None, ai = None):
+	def __init__(self, x, y, char, name, color, blocks = False, components=[]):
 		self.name = name
 		self.blocks = blocks
 		self.x = x
 		self.y = y
 		self.char = char
 		self.color = color
-		self.fighter = fighter
-		if self.fighter:
-			self.fighter.owner = self
-		self.ai = ai
-		if self.ai:
-			self.ai.owner = self
+		self.components = components
+		for c in self.components:
+			c.owner = self
 		
 	def move(self, dx, dy):
 		# Moves the object by the given amount
-		try:
-			if not self.is_blocked(self.x + dx, self.y + dy):
-				self.x += dx
-				self.y += dy
-		except IndexError:
-			print("Trying to go out of map bounds at (" + str(self.x) + ", " + str(self.y) + ")")
+		if not self.is_blocked(self.x + dx, self.y + dy):
+			self.x += dx
+			self.y += dy
 		
 	def draw(self):
 		# Draws the object's character from the screen
@@ -336,7 +438,8 @@ class Object(object):
 		libtcod.console_put_char(con, self.x, self.y, ' ', libtcod.BKGND_NONE)
 		
 	def update(self):
-		pass
+		for c in self.components:
+			c.update()
 	
 	def set_position(self, newPosition):
 		self.x = newPosition[0]
@@ -387,15 +490,37 @@ class Object(object):
 		global objects
 		objects.remove(self)
 		objects.insert(0, self)
+	
+	def add_component(self, newComponent):
+		already_has_component = False
+		for component in self.components:
+			if newComponent.name == component.name:
+				already_has_component = True
+				break
+		if not already_has_component:
+			self.components.append(newComponent)
+			newComponent.owner = self
+	
+	def get_component(self, name):
+		for c in self.components:
+			if c.name == name:
+				return c
+				
+	def remove_component(self, name):
+		for c in self.components:
+			if c.name == name:
+				self.components.remove(c)
 
 class Player(Object):
-	def __init__(self, x, y, char, color, fighter):
-		Object.__init__(self, x, y, char, "Player", color, blocks=True, fighter = fighter)
+	def __init__(self, x, y, char, color, comps=[]):
+		Object.__init__(self, x, y, char, "Player", color, blocks=True, components=comps)
 		
 		self.FOV_algo = 0 # Default Field Of View algorithm
 		self.FOV_light_walls = True
 		
 		self.view_radius = 10
+		
+		self.action = None
 	
 	def update(self):
 		super(Player, self).update()
@@ -410,50 +535,71 @@ class Player(Object):
 		# Detect any attackable object
 		target = None
 		for object in objects:
-			if object.fighter and object.x == x and object.y == y:
+			if object.get_component("Fighter") and object.x == x and object.y == y:
 				target = object
 				break
 		
 		# If a target is found, attack, otherwise, move
 		if target is not None:
-			self.fighter.attack(target)
+			self.get_component("Fighter").attack(target)
 		else:
 			player.move(dx, dy)
-			fov_recompute = True
+			gameMap.fov_recompute = True
+			
+		self.action = "moved"
 	
 	def get_input(self):
+		global key
+		self.action = None
 		
-		if(libtcod.console_is_key_pressed(libtcod.KEY_UP)):
+		if(key.vk == libtcod.KEY_UP):
 			self.move_or_attack(0, -1)
 	
-		elif(libtcod.console_is_key_pressed(libtcod.KEY_DOWN)):
+		elif(key.vk == libtcod.KEY_DOWN):
 			self.move_or_attack(0, 1)
 		
-		elif(libtcod.console_is_key_pressed(libtcod.KEY_LEFT)):
+		elif(key.vk == libtcod.KEY_LEFT):
 			self.move_or_attack(-1, 0)
 		
-		elif(libtcod.console_is_key_pressed(libtcod.KEY_RIGHT)):
+		elif(key.vk == libtcod.KEY_RIGHT):
 			self.move_or_attack(1, 0)
-		else:
-			return "didnt-take-turn"
+		
+		return self.action
 	
 ################################################################################
 #                                INITIALIZATION                                #
 #        Things that need to be loaded at the start of the game go here        #
 ################################################################################
-con = libtcod.console_new(SCREEN_WIDTH, SCREEN_HEIGHT)
+con = libtcod.console_new(MAP_WIDTH, MAP_HEIGHT)
+panel = libtcod.console_new(SCREEN_WIDTH, PANEL_HEIGHT)
 
 gameMap = GameMap()
 gameMap.make_map()
 gameMap.make_fov_map()
 
-fighter_component = Components.Fighter(hp = 30, defense = 2, power = 5, death_function=player_death)
-player = Player(gameMap.center_of_first_room[0], gameMap.center_of_first_room[1], '@', libtcod.white, fighter = fighter_component)
+fighter_component = Fighter(hp = 30, defense = 2, power = 5, death_function=player_death)
+player = Player(gameMap.center_of_first_room[0], gameMap.center_of_first_room[1], '@', libtcod.white)
+player.add_component(fighter_component)
 
 objects.append(player)
 	
 game_state = "playing"
-player_action = None
+
+# Set the default console window to 'con', this is the main window
+libtcod.console_set_default_foreground(0, libtcod.white)
+
+mouse = libtcod.Mouse()
+key = libtcod.Key()
+
+# Render everything
+render_all()
+
+for obj in objects:
+	obj.clear(con)
+	
+libtcod.console_flush()
+
+libtcod.sys_set_fps(LIMIT_FPS)
 
 ################################################################################
 #                                MAIN GAME LOOP                                #
@@ -461,28 +607,23 @@ player_action = None
 ################################################################################
 
 while not libtcod.console_is_window_closed():
-	# Set the default console window to 'con', this is the main window
-	libtcod.console_set_default_foreground(0, libtcod.white)
-	
-	for obj in objects:
-		obj.update()
-	
-	gameMap.update()
-	
-	render_all()
-	
-	# Flush changes to the screen (this updates what is visible on-screen)
-	libtcod.console_flush()
-	
-	for obj in objects:
-		obj.clear(con)
-	
+	libtcod.sys_check_for_event(libtcod.EVENT_KEY_PRESS | libtcod.EVENT_MOUSE, key, mouse)
+
 	player_action = handle_keys()
 	
 	if player_action == "exit":
 		break
+	
+	player.update()
+	
+	for obj in objects:
+		if obj != player and player.action == "moved":
+			obj.update()
+			
+	render_all()
+	
+	for obj in objects:
+		obj.clear(con)
 		
-	if game_state == "playing":
-		for obj in objects:
-			if obj.ai:
-				obj.ai.take_turn()
+	# Flush changes to the screen (this updates what is visible on-screen)
+	libtcod.console_flush()
