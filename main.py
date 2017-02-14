@@ -8,7 +8,7 @@ import textwrap
 ################################################################################
 
 # FPS limit
-LIMIT_FPS = 60
+LIMIT_FPS = 30
 
 # Window dimensions
 SCREEN_WIDTH = 80
@@ -30,6 +30,13 @@ MSG_HEIGHT = PANEL_HEIGHT - 1
 
 INVENTORY_WIDTH = 50
 
+LIGHTNING_DAMAGE = 20
+LIGHTNING_RANGE = 5
+CONFUSE_NUM_TURNS = 10
+CONFUSE_RANGE = 8
+FIREBALL_DAMAGE = 12
+FIREBALL_RADIUS = 3
+
 FOV = True # Is Field of View enabled?	
 generateMonsters = True # Is the game generating monsters upon level creation?
 
@@ -48,6 +55,85 @@ game_msgs = []
 # The player's inventory
 inventory = []
 
+def target_tile(max_range=None):
+	# Return the position of a tile left-clicked in player's FOV (optionally in a range),
+	# or (None, None) if right-clicked
+	global key, mouse
+	while True:
+		# Render the screen. This erases the inventory and shows the names of objects under the mouse.
+		libtcod.console_flush()
+		libtcod.sys_check_for_event(libtcod.EVENT_KEY_PRESS | libtcod.EVENT_MOUSE, key, mouse)
+		render_all()
+		
+		(x, y) = (mouse.cx, mouse.cy)
+		
+		# Accept the target if the player clicked in FOV, and, in case a range is specified, if it's within that range
+		if mouse.lbutton_pressed and libtcod.map_is_in_fov(gameMap.fov_map, x, y) and (max_range is None or player.distance(x, y) <= max_range):
+			return (x, y)
+			
+		if mouse.rbutton_pressed or key.vk == libtcod.KEY_ESCAPE:
+			return (None, None) # Cancel if the player right clicked or pressed escape
+
+def target_monster(max_range=None):
+	# Returns a clicked monster inside FOV up to a range, or None if right clicked
+	while True:
+		(x, y) = target_tile(max_range)
+		if x is None:	# Player cancelled
+			return None
+			
+		# Return the first clicked monster, otherwise continue looping
+		for obj in objects:
+			if obj.position == (x, y) and obj.get_component("Fighter") and obj != player:
+				return obj
+			
+def cast_heal():
+	# Get the fighter component, and heal it
+	fComp = player.get_component("Fighter")
+	damageHealed = 0
+	if fComp:
+		damageHealed = fComp.max_hp - fComp.hp
+		if damageHealed:
+			fComp.hp = fComp.max_hp
+			message("You used the healing potion and healed {0} hit points!".format(damageHealed), libtcod.light_green)
+		else:
+			message("You already have full health.")
+			
+def cast_lightning():
+	# Find the closest enemy (inside a maximum range) and damage it
+	monster = player.closest_enemy(LIGHTNING_RANGE)
+	if monster is None: # Couldn't find a monster within range
+		message("No enemy is close enough to strike.", libtcod.red)
+		return "cancelled"
+	
+	# Zap it!
+	message("A lightning bolt strikes the {0} with a thunderous report! The {0} takes {1} damage.".format(monster.name, LIGHTNING_DAMAGE), libtcod.light_yellow)
+	monster.get_component("Fighter").take_damage(LIGHTNING_DAMAGE)
+
+def cast_confuse():
+	# Ask the player for a target to confuse
+	message("Left click an enemy to confuse it, or right click to cancel.", libtcod.light_cyan)
+	monster = target_monster(CONFUSE_RANGE)
+	if monster is None: return "cancelled"
+	
+	# Replace the monster's AI with a "confused" one; after some turns it will restore the old AI
+	old_ai = monster.get_component("BasicMonster")
+	new_ai = ConfusedMonster(old_ai)
+	old_ai.active = False
+	monster.add_component(new_ai)
+	message("The eyes of the {0} turn glassy and vacant as he stumbles in confusion!".format(monster.name), libtcod.light_green)
+
+def cast_fireball():
+	# Ask the player for a target tile to throw a fireball at
+	message("Left click a target tile for the fireball, or right click to cancel.", libtcod.light_cyan)
+	(x, y) = target_tile()
+	if x is None: return "cancelled"
+	
+	message("The fireball explodes, burning everything within {0} tiles!".format(FIREBALL_RADIUS), libtcod.orange)
+	for obj in objects: # Damage every fighter within range, including the player
+		if obj.distance(x, y) <= FIREBALL_RADIUS and obj.get_component("Fighter"):
+			message("The {0} gets burned for {1} hit points.".format(obj.name, FIREBALL_DAMAGE))
+			obj.get_component("Fighter").take_damage(FIREBALL_DAMAGE)
+	
 def player_death(player):
 	global game_state
 	message("You died!", libtcod.light_red)
@@ -190,6 +276,9 @@ def render_all():
 	# Blit the contents of "panel" to the root console
 	libtcod.console_blit(panel, 0, 0, SCREEN_WIDTH, PANEL_HEIGHT, 0, 0, PANEL_Y)
 	
+	for obj in objects:
+		obj.clear(con)
+	
 def get_names_under_mouse():
 	global mouse
 	
@@ -222,9 +311,14 @@ def handle_keys():
 class Component:
 	def __init__(self, name):
 		self.name = name
+		self.active = True
 	
 	def update(self):
-		pass
+		if self.active:
+			try:
+				self.step()
+			except AttributeError:
+				pass
 
 class Fighter(Component):
 	# Combat-related properties and methods
@@ -265,7 +359,7 @@ class BasicMonster(Component):
 	def __init__(self):
 		Component.__init__(self, "BasicMonster")
 	# AI for a monster
-	def update(self):
+	def step(self):
 		monster = self.owner
 		player = monster.get_player()
 		
@@ -277,6 +371,24 @@ class BasicMonster(Component):
 			elif player.get_component("Fighter").hp > 0:
 				monster.get_component("Fighter").attack(player)		
 
+class ConfusedMonster(Component):
+	def __init__(self, old_ai, num_turns = CONFUSE_NUM_TURNS):
+		Component.__init__(self, "ConfusedMonster")
+		self.old_ai = old_ai
+		self.num_turns = num_turns
+		
+	# AI for a confused monster
+	def step(self):
+		if self.num_turns > 0: # Still confused...
+			# Move in a random direction
+			self.owner.move(libtcod.random_get_int(0, -1, 1), libtcod.random_get_int(0, -1, 1))
+			self.num_turns -= 1
+		else:
+			# Remove this confused ai, add the old one back, and inform the player
+			self.owner.components.remove(self)
+			self.old_ai.active = True
+			message("The {0} is no longer confused!".format(self.owner.name), libtcod.red)
+			
 class Item(Component):
 	def __init__(self, use_function=None):
 		Component.__init__(self, "Item")
@@ -299,6 +411,14 @@ class Item(Component):
 			if self.use_function() != 'cancelled':
 				inventory.remove(self.owner) # Destroy after use, unless it was cancelled for some reason
 				
+	def drop(self):
+		# Add to the map and remove from the player's inventory. 
+		# Then place it at the player's position
+		objects.append(self.owner)
+		inventory.remove(self.owner)
+		self.owner.position = player.position
+		message("You dropped a {0}.".format(self.owner.name), libtcod.yellow)
+		
 class Rect(object):
 	def __init__(self, x, y, w, h):
 		self.x1 = x
@@ -491,15 +611,33 @@ class GameMap(object):
 				objects.append(monster)
 				
 		# And now the items
+		dice = libtcod.random_get_int(0, 0, 100)
 		for i in range(num_items):
+			dice = libtcod.random_get_int(0, 0, 100)
+
 			# We'll choose a random spot for this item
 			x = libtcod.random_get_int(0, room.x1 + 1, room.x2 - 1)
 			y = libtcod.random_get_int(0, room.y1 + 1, room.y2 - 1)
 			
+			# Create the item itself
+			if dice < 60:
+				# Create a healing potion
+				itemComp = Item(use_function=cast_heal)
+				item = Object(x, y, "!", "healing potion", libtcod.violet, False, [itemComp])
+			elif dice < 75:
+				# Create a lightning spell
+				itemComp = Item(use_function=cast_lightning)
+				item = Object(x, y, "#", "scroll of lightning bolt", libtcod.light_yellow, False, [itemComp])
+			elif dice < 85:
+				# Create a fireball spell
+				itemComp = Item(use_function=cast_fireball)
+				item = Object(x, y, "#", "scroll of fireball", libtcod.orange, False, [itemComp])
+			else:
+				# Create a confuse scroll
+				itemComp = Item(use_function=cast_confuse)
+				item = Object (x, y, "#", "scroll of confusion", libtcod.light_purple, False, [itemComp])
+				
 			# We'll only place it if the tile isn't blocked
-			itemComp = Item()
-			item = Object(x, y, "!", "Healing potion", libtcod.violet, False, [itemComp])
-			
 			if not item.is_blocked(x, y):
 				objects.append(item)
 				item.send_to_back()
@@ -579,6 +717,10 @@ class Object(object):
 		
 		return math.sqrt(dx ** 2 + dy ** 2)
 	
+	def distance(self, x, y):
+		# Return the distance to some coordinates
+		return math.sqrt((x - self.x) ** 2 + (y - self.y) ** 2)
+	
 	def get_fov_map(self):
 		return gameMap.fov_map
 	
@@ -612,7 +754,22 @@ class Object(object):
 		for c in self.components:
 			if c.name == name:
 				self.components.remove(c)
-
+	
+	def closest_enemy(self, max_range):
+		# Find closest enemy, up to a maximum range, and in the player's FOV
+		closest_thing = None
+		closest_dist = max_range + 1 # Start with (slightly more than) the maximum range
+		
+		for object in objects:
+			if object.get_component("Fighter") and not object == self and libtcod.map_is_in_fov(gameMap.fov_map, object.x, object.y):
+				# Calculate distance between this object and the player
+				dist = self.distance_to(object)
+				if dist < closest_dist: # It's closer, so remember it
+					closest_thing = object
+					closest_dist = dist
+		
+		return closest_thing
+				
 	@property
 	def position(self):
 		return (self.x, self.y)
@@ -685,7 +842,7 @@ class Player(Object):
 						itemComp = object.get_component("Item")
 						if(itemComp):
 							itemComp.pick_up()
-							self.action = "picked_up_item"
+							return "picked_up_item"
 							break
 						
 			elif key_char == "i":
@@ -693,6 +850,14 @@ class Player(Object):
 				chosenItem = inventory_menu("Press the key next to an item to use it, or any other to cancel.\n")
 				if chosenItem:
 					chosenItem.use()
+					return "used_item"
+					
+			elif key_char == "d":
+				# Show inventory
+				chosenItem = inventory_menu("Press the key next to an item to drop it, or any other to cancel.\n")
+				if chosenItem:
+					chosenItem.drop()
+					return "dropped_item"
 			
 		return self.action
 	
@@ -731,6 +896,18 @@ libtcod.console_flush()
 
 libtcod.sys_set_fps(LIMIT_FPS)
 
+itemComp = Item(use_function=cast_fireball)
+item = Object(0, 0, "#", "scroll of fireball", libtcod.orange, False, [itemComp])
+inventory.append(item)
+
+itemComp = Item(use_function=cast_lightning)
+item = Object (0, 0, "#", "scroll of lightning bolt", libtcod.light_yellow, False, [itemComp])
+inventory.append(item)
+
+itemComp = Item(use_function=cast_confuse)
+item = Object (0, 0, "#", "scroll of confusion", libtcod.light_purple, False, [itemComp])
+inventory.append(item)
+
 message("Welcome to the scariest and most monster-filled dungeon of ALL-TIME!! YOU SHALL NOT SURVIVE!!!!!!!")
 
 ################################################################################
@@ -742,20 +919,17 @@ while not libtcod.console_is_window_closed():
 	libtcod.sys_check_for_event(libtcod.EVENT_KEY_PRESS | libtcod.EVENT_MOUSE, key, mouse)
 
 	player_action = handle_keys()
-	
+		
 	if player_action == "exit":
 		break
 	
 	player.update()
 	
 	for obj in objects:
-		if obj != player and player.action == "moved":
+		if obj != player and player_action:
 			obj.update()
 			
 	render_all()
-	
-	for obj in objects:
-		obj.clear(con)
 		
 	# Flush changes to the screen (this updates what is visible on-screen)
 	libtcod.console_flush()
