@@ -37,23 +37,18 @@ CONFUSE_RANGE = 8
 FIREBALL_DAMAGE = 12
 FIREBALL_RADIUS = 3
 
-FOV = True # Is Field of View enabled?	
-generateMonsters = True # Is the game generating monsters upon level creation?
-
 # Set console font
 libtcod.console_set_custom_font('arial12x12.png', libtcod.FONT_LAYOUT_TCOD)
 
 # Initialize window
 libtcod.console_init_root(SCREEN_WIDTH, SCREEN_HEIGHT, 'python/libtcod tutorial', False)
 
-# This list holds all objects in the game
-objects = []
+# Consoles to put game visualization
+con = libtcod.console_new(MAP_WIDTH, MAP_HEIGHT)
+panel = libtcod.console_new(SCREEN_WIDTH, PANEL_HEIGHT)
 
-# This list holds all the GUI messages for the player
-game_msgs = []
-
-# The player's inventory
-inventory = []
+# Set the default console window to 'con', this is the main window
+libtcod.console_set_default_foreground(0, libtcod.white)
 
 def target_tile(max_range=None):
 	# Return the position of a tile left-clicked in player's FOV (optionally in a range),
@@ -82,7 +77,7 @@ def target_monster(max_range=None):
 			return None
 			
 		# Return the first clicked monster, otherwise continue looping
-		for obj in objects:
+		for obj in gameMap.objects:
 			if obj.position == (x, y) and obj.get_component("Fighter") and obj != player:
 				return obj
 			
@@ -129,7 +124,7 @@ def cast_fireball():
 	if x is None: return "cancelled"
 	
 	message("The fireball explodes, burning everything within {0} tiles!".format(FIREBALL_RADIUS), libtcod.orange)
-	for obj in objects: # Damage every fighter within range, including the player
+	for obj in gameMap.objects: # Damage every fighter within range, including the player
 		if obj.distance(x, y) <= FIREBALL_RADIUS and obj.get_component("Fighter"):
 			message("The {0} gets burned for {1} hit points.".format(obj.name, FIREBALL_DAMAGE))
 			obj.get_component("Fighter").take_damage(FIREBALL_DAMAGE)
@@ -229,23 +224,22 @@ def menu(header, options, width):
 
 def inventory_menu(header):
 	# Show a menu with each item of the inventory as an option_text
-	if len(inventory) == 0:
+	if len(player.inventory) == 0:
 		options = ["Inventory is empty."]
 	else:
-		options = [item.name for item in inventory]
+		options = [item.name for item in player.inventory]
 		
 	index = menu(header, options, INVENTORY_WIDTH)
-	if index is None or not len(inventory): return None
-	return inventory[index].get_component("Item")	
+	if index is None or not len(player.inventory): return None
+	return player.inventory[index].get_component("Item")	
 	
 def render_all():
-	if(FOV):
-		if gameMap.fov_recompute:
-			# If the map needs to recompute the FOV map, do it once
-			gameMap.fov_recompute = False
-			gameMap.recompute_fov_map(player)
+	if gameMap.fov_recompute:
+		# If the map needs to recompute the FOV map, do it once
+		gameMap.fov_recompute = False
+		gameMap.recompute_fov_map(player)
 			
-	for obj in objects:
+	for obj in gameMap.objects:
 		if obj != player:
 			obj.draw()
 	player.draw()
@@ -276,8 +270,11 @@ def render_all():
 	# Blit the contents of "panel" to the root console
 	libtcod.console_blit(panel, 0, 0, SCREEN_WIDTH, PANEL_HEIGHT, 0, 0, PANEL_Y)
 	
-	for obj in objects:
+	for obj in gameMap.objects:
 		obj.clear(con)
+		
+	# Flush changes to the screen (this updates what is visible on-screen)
+	libtcod.console_flush()
 	
 def get_names_under_mouse():
 	global mouse
@@ -286,7 +283,7 @@ def get_names_under_mouse():
 	(x, y) = (mouse.cx, mouse.cy)
 	
 	# Create a list with the names of all objects at the mouse's coordinates and in the FOV
-	names = [obj.name for obj in objects if obj.x == x and obj.y == y and libtcod.map_is_in_fov(gameMap.fov_map, obj.x, obj.y)]
+	names = [obj.name for obj in gameMap.objects if obj.x == x and obj.y == y and libtcod.map_is_in_fov(gameMap.fov_map, obj.x, obj.y)]
 	
 	names = ', '.join(names) # Joins all the names together, seperated by commas
 	
@@ -307,6 +304,61 @@ def handle_keys():
 	
 	if game_state == "playing":
 		return player.get_input()
+	
+def new_game():
+	global game_msgs, gameMap, player, game_state
+	# This list holds all the GUI messages for the player
+	game_msgs = []
+	
+	# Initialize the game map and fov map
+	gameMap = GameMap()
+	gameMap.make_map()
+	gameMap.make_fov_map()
+	
+	# Create player with a fighter component
+	player = Player(gameMap.center_of_first_room[0], gameMap.center_of_first_room[1], '@', libtcod.white)
+	gameMap.objects.append(player)
+	
+	game_state = "playing"
+	
+	# Limit FPS
+	libtcod.sys_set_fps(LIMIT_FPS)
+
+	itemComp = Item(use_function=cast_fireball)
+	item = Object(0, 0, "#", "scroll of fireball", libtcod.orange, False, [itemComp])
+	player.inventory.append(item)
+
+	itemComp = Item(use_function=cast_lightning)
+	item = Object(0, 0, "#", "scroll of lightning bolt", libtcod.light_yellow, False, [itemComp])
+	player.inventory.append(item)
+
+	itemComp = Item(use_function=cast_confuse)
+	item = Object(0, 0, "#", "scroll of confusion", libtcod.light_purple, False, [itemComp])
+	player.inventory.append(item)
+	
+def play_game():
+	global mouse, key
+	
+	mouse = libtcod.Mouse()
+	key = libtcod.Key()
+		
+	player_action = None
+	
+	while not libtcod.console_is_window_closed():
+		libtcod.sys_check_for_event(libtcod.EVENT_KEY_PRESS | libtcod.EVENT_MOUSE, key, mouse)
+		
+		render_all()
+		
+		player_action = handle_keys()
+			
+		if player_action == "exit":
+			break
+		
+		player.update()
+		
+		for obj in gameMap.objects:
+			if obj != player and player_action:
+				obj.update()
 	
 class Component:
 	def __init__(self, name):
@@ -396,11 +448,11 @@ class Item(Component):
 	# This allows an object to be picked up and used
 	def pick_up(self):
 		# Add self to player's inventory and remove from the map
-		if len(inventory) >= 26:
+		if len(player.inventory) >= 26:
 			message("Your inventory is full, cannot pick up {0}.".format(self.owner.name), libtcod.red)
 		else:
-			objects.remove(self.owner)
-			inventory.append(self.owner)
+			gameMap.objects.remove(self.owner)
+			player.inventory.append(self.owner)
 			message("You picked up a {0}!".format(self.owner.name), libtcod.green)
 	
 	def use(self):
@@ -409,13 +461,13 @@ class Item(Component):
 			message("The {0} cannot be used.".format(self.owner.name))
 		else:
 			if self.use_function() != 'cancelled':
-				inventory.remove(self.owner) # Destroy after use, unless it was cancelled for some reason
+				player.inventory.remove(self.owner) # Destroy after use, unless it was cancelled for some reason
 				
 	def drop(self):
 		# Add to the map and remove from the player's inventory. 
 		# Then place it at the player's position
-		objects.append(self.owner)
-		inventory.remove(self.owner)
+		gameMap.objects.append(self.owner)
+		player.inventory.remove(self.owner)
 		self.owner.position = player.position
 		message("You dropped a {0}.".format(self.owner.name), libtcod.yellow)
 		
@@ -462,14 +514,13 @@ class GameMap(object):
 		
 		# Tells the game if the fov map needs to be recomputed
 		self.fov_recompute = True
+		
+		self.objects = []
 				
 	def draw(self):
 		for y in range(MAP_HEIGHT):
 			for x in range(MAP_WIDTH):
-				if(FOV):
-					visible = libtcod.map_is_in_fov(self.fov_map, x, y)
-				else:
-					visible = True
+				visible = libtcod.map_is_in_fov(self.fov_map, x, y)
 				wall = self.map[x][y].block_sight
 				if not visible:
 					# If the tile isn't visible by the player, first check to see 
@@ -551,8 +602,8 @@ class GameMap(object):
 						#first move vertically, then horizontally
 						self.create_v_tunnel(prevY, newY, prevX)
 						self.create_h_tunnel(prevX, newX, newY)
-				if(generateMonsters):
-					self.place_objects(new_room, objects)
+						
+				self.place_objects(new_room)
 				rooms.append(new_room)
 				num_rooms += 1
 		self.make_fov_map()
@@ -583,7 +634,7 @@ class GameMap(object):
 			for x in range(MAP_WIDTH):
 				libtcod.console_set_char_background(con, x, y, libtcod.black, libtcod.BKGND_SET)
 				
-	def place_objects(self, room, objects):
+	def place_objects(self, room):
 		# Choose random number of monsters and items
 		num_monsters = libtcod.random_get_int(0, 0, self.max_room_monsters)
 		num_items = libtcod.random_get_int(0, 0, MAX_ROOM_ITEMS)
@@ -608,7 +659,7 @@ class GameMap(object):
 				monster = Object(x, y, 'T', "Troll", libtcod.darker_green, blocks=True, components=[fighter_component, ai_component])
 				
 			if not monster.is_blocked(x, y):
-				objects.append(monster)
+				self.objects.append(monster)
 				
 		# And now the items
 		dice = libtcod.random_get_int(0, 0, 100)
@@ -639,7 +690,7 @@ class GameMap(object):
 				
 			# We'll only place it if the tile isn't blocked
 			if not item.is_blocked(x, y):
-				objects.append(item)
+				self.objects.append(item)
 				item.send_to_back()
 		
 class Object(object):
@@ -665,11 +716,7 @@ class Object(object):
 		
 	def draw(self):
 		# Draws the object's character from the screen
-		if(FOV):
-			if libtcod.map_is_in_fov(gameMap.fov_map, self.x, self.y):
-				libtcod.console_set_default_foreground(con, self.color)
-				libtcod.console_put_char(con, self.x, self.y, self.char, libtcod.BKGND_NONE)
-		else:
+		if libtcod.map_is_in_fov(gameMap.fov_map, self.x, self.y):
 			libtcod.console_set_default_foreground(con, self.color)
 			libtcod.console_put_char(con, self.x, self.y, self.char, libtcod.BKGND_NONE)
 	def clear(self, con):
@@ -693,7 +740,7 @@ class Object(object):
 			return True
 		
 		# Now we check for any blocking objects
-		for obj in objects:
+		for obj in gameMap.objects:
 			if obj.blocks and obj.get_position() == (x, y) and obj != self:
 				return True
 		
@@ -731,8 +778,8 @@ class Object(object):
 		# This method makes this object draw first, so other objects are drawn
 		# on top of it.
 		global objects
-		objects.remove(self)
-		objects.insert(0, self)
+		gameMap.objects.remove(self)
+		gameMap.objects.insert(0, self)
 	
 	def add_component(self, newComponent):
 		already_has_component = False
@@ -760,7 +807,7 @@ class Object(object):
 		closest_thing = None
 		closest_dist = max_range + 1 # Start with (slightly more than) the maximum range
 		
-		for object in objects:
+		for object in gameMap.objects:
 			if object.get_component("Fighter") and not object == self and libtcod.map_is_in_fov(gameMap.fov_map, object.x, object.y):
 				# Calculate distance between this object and the player
 				dist = self.distance_to(object)
@@ -787,7 +834,12 @@ class Player(Object):
 		
 		self.view_radius = 10
 		
+		# Player automatically gets a fighter component
+		self.add_component(Fighter(hp = 30, defense = 2, power = 5, death_function=player_death))
+		
 		self.action = None
+		
+		self.inventory = []
 	
 	def update(self):
 		super(Player, self).update()
@@ -801,7 +853,7 @@ class Player(Object):
 		
 		# Detect any attackable object
 		target = None
-		for object in objects:
+		for object in gameMap.objects:
 			if object.get_component("Fighter") and object.x == x and object.y == y:
 				target = object
 				break
@@ -837,7 +889,7 @@ class Player(Object):
 			
 			if key_char == 'g':
 				# Pick up an item
-				for object in objects: # Look for an item under player
+				for object in gameMap.objects: # Look for an item under player
 					if object.position == self.position:
 						itemComp = object.get_component("Item")
 						if(itemComp):
@@ -859,77 +911,11 @@ class Player(Object):
 					chosenItem.drop()
 					return "dropped_item"
 			
-		return self.action
-	
-################################################################################
-#                                INITIALIZATION                                #
-#        Things that need to be loaded at the start of the game go here        #
-################################################################################
-con = libtcod.console_new(MAP_WIDTH, MAP_HEIGHT)
-panel = libtcod.console_new(SCREEN_WIDTH, PANEL_HEIGHT)
-
-gameMap = GameMap()
-gameMap.make_map()
-gameMap.make_fov_map()
-
-fighter_component = Fighter(hp = 30, defense = 2, power = 5, death_function=player_death)
-player = Player(gameMap.center_of_first_room[0], gameMap.center_of_first_room[1], '@', libtcod.white)
-player.add_component(fighter_component)
-
-objects.append(player)
-	
-game_state = "playing"
-
-# Set the default console window to 'con', this is the main window
-libtcod.console_set_default_foreground(0, libtcod.white)
-
-mouse = libtcod.Mouse()
-key = libtcod.Key()
-
-# Render everything
-render_all()
-
-for obj in objects:
-	obj.clear(con)
-	
-libtcod.console_flush()
-
-libtcod.sys_set_fps(LIMIT_FPS)
-
-itemComp = Item(use_function=cast_fireball)
-item = Object(0, 0, "#", "scroll of fireball", libtcod.orange, False, [itemComp])
-inventory.append(item)
-
-itemComp = Item(use_function=cast_lightning)
-item = Object (0, 0, "#", "scroll of lightning bolt", libtcod.light_yellow, False, [itemComp])
-inventory.append(item)
-
-itemComp = Item(use_function=cast_confuse)
-item = Object (0, 0, "#", "scroll of confusion", libtcod.light_purple, False, [itemComp])
-inventory.append(item)
-
-message("Welcome to the scariest and most monster-filled dungeon of ALL-TIME!! YOU SHALL NOT SURVIVE!!!!!!!")
-
-################################################################################
-#                                MAIN GAME LOOP                                #
-#         Things here are repeated every time the player takes a turn          #
-################################################################################
-
-while not libtcod.console_is_window_closed():
-	libtcod.sys_check_for_event(libtcod.EVENT_KEY_PRESS | libtcod.EVENT_MOUSE, key, mouse)
-
-	player_action = handle_keys()
-		
-	if player_action == "exit":
-		break
-	
-	player.update()
-	
-	for obj in objects:
-		if obj != player and player_action:
-			obj.update()
+			elif key_char == ".":
+				return "didnt_take_turn"
 			
-	render_all()
-		
-	# Flush changes to the screen (this updates what is visible on-screen)
-	libtcod.console_flush()
+		return self.action
+
+if __name__ == "__main__":
+	new_game()
+	play_game()
