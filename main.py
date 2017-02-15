@@ -49,316 +49,6 @@ panel = libtcod.console_new(SCREEN_WIDTH, PANEL_HEIGHT)
 
 # Set the default console window to 'con', this is the main window
 libtcod.console_set_default_foreground(0, libtcod.white)
-
-def target_tile(max_range=None):
-	# Return the position of a tile left-clicked in player's FOV (optionally in a range),
-	# or (None, None) if right-clicked
-	global key, mouse
-	while True:
-		# Render the screen. This erases the inventory and shows the names of objects under the mouse.
-		libtcod.console_flush()
-		libtcod.sys_check_for_event(libtcod.EVENT_KEY_PRESS | libtcod.EVENT_MOUSE, key, mouse)
-		render_all()
-		
-		(x, y) = (mouse.cx, mouse.cy)
-		
-		# Accept the target if the player clicked in FOV, and, in case a range is specified, if it's within that range
-		if mouse.lbutton_pressed and libtcod.map_is_in_fov(gameMap.fov_map, x, y) and (max_range is None or player.distance(x, y) <= max_range):
-			return (x, y)
-			
-		if mouse.rbutton_pressed or key.vk == libtcod.KEY_ESCAPE:
-			return (None, None) # Cancel if the player right clicked or pressed escape
-
-def target_monster(max_range=None):
-	# Returns a clicked monster inside FOV up to a range, or None if right clicked
-	while True:
-		(x, y) = target_tile(max_range)
-		if x is None:	# Player cancelled
-			return None
-			
-		# Return the first clicked monster, otherwise continue looping
-		for obj in gameMap.objects:
-			if obj.position == (x, y) and obj.get_component("Fighter") and obj != player:
-				return obj
-			
-def cast_heal():
-	# Get the fighter component, and heal it
-	fComp = player.get_component("Fighter")
-	damageHealed = 0
-	if fComp:
-		damageHealed = fComp.max_hp - fComp.hp
-		if damageHealed:
-			fComp.hp = fComp.max_hp
-			message("You used the healing potion and healed {0} hit points!".format(damageHealed), libtcod.light_green)
-		else:
-			message("You already have full health.")
-			
-def cast_lightning():
-	# Find the closest enemy (inside a maximum range) and damage it
-	monster = player.closest_enemy(LIGHTNING_RANGE)
-	if monster is None: # Couldn't find a monster within range
-		message("No enemy is close enough to strike.", libtcod.red)
-		return "cancelled"
-	
-	# Zap it!
-	message("A lightning bolt strikes the {0} with a thunderous report! The {0} takes {1} damage.".format(monster.name, LIGHTNING_DAMAGE), libtcod.light_yellow)
-	monster.get_component("Fighter").take_damage(LIGHTNING_DAMAGE)
-
-def cast_confuse():
-	# Ask the player for a target to confuse
-	message("Left click an enemy to confuse it, or right click to cancel.", libtcod.light_cyan)
-	monster = target_monster(CONFUSE_RANGE)
-	if monster is None: return "cancelled"
-	
-	# Replace the monster's AI with a "confused" one; after some turns it will restore the old AI
-	old_ai = monster.get_component("BasicMonster")
-	new_ai = ConfusedMonster(old_ai)
-	old_ai.active = False
-	monster.add_component(new_ai)
-	message("The eyes of the {0} turn glassy and vacant as he stumbles in confusion!".format(monster.name), libtcod.light_green)
-
-def cast_fireball():
-	# Ask the player for a target tile to throw a fireball at
-	message("Left click a target tile for the fireball, or right click to cancel.", libtcod.light_cyan)
-	(x, y) = target_tile()
-	if x is None: return "cancelled"
-	
-	message("The fireball explodes, burning everything within {0} tiles!".format(FIREBALL_RADIUS), libtcod.orange)
-	for obj in gameMap.objects: # Damage every fighter within range, including the player
-		if obj.distance(x, y) <= FIREBALL_RADIUS and obj.get_component("Fighter"):
-			message("The {0} gets burned for {1} hit points.".format(obj.name, FIREBALL_DAMAGE))
-			obj.get_component("Fighter").take_damage(FIREBALL_DAMAGE)
-	
-def player_death(player):
-	global game_state
-	message("You died!", libtcod.light_red)
-	game_state = "dead"
-	
-	player.char = '%'
-	player.color = libtcod.dark_red
-
-def monster_death(monster):
-	message(monster.name.capitalize() + " is dead!", libtcod.light_blue)
-	monster.char = '%'
-	monster.color = libtcod.dark_red
-	monster.blocks = False
-	monster.remove_component("Fighter")
-	monster.remove_component("BasicMonster")
-	monster.name = "Remains of " + monster.name
-	monster.send_to_back()
-
-def message(new_msg, color = libtcod.white):
-	# First we'll split the message if necessary into multiple lines (text wrapping)
-	new_msg_lines = textwrap.wrap(new_msg, MSG_WIDTH)
-	
-	for line in new_msg_lines:
-		# If the buffer is full, remove the first line to make room for the
-		# new line.
-		if len(game_msgs) == MSG_HEIGHT:
-			del game_msgs[0]
-		
-		# Add the new line as a tuple, with the text and the color
-		game_msgs.append((line, color))
-	
-def render_bar(x, y, total_width, name, value, maximum, bar_color, back_color):
-	# Renders a status bar (for HP, experience points, etc.)
-	
-	# First we'll calculate the width of the bar
-	bar_width = int(float(value) / maximum * total_width)
-	
-	# Then we'll render the background
-	libtcod.console_set_default_background(panel, back_color)
-	libtcod.console_rect(panel, x, y, total_width, 1, False, libtcod.BKGND_SCREEN)
-	
-	# Now we render the bar on top of the background
-	libtcod.console_set_default_background(panel, back_color)
-	if bar_width > 0:
-		libtcod.console_rect(panel, x, y, bar_width, 1, False, libtcod.BKGND_SCREEN)
-		
-	# And now we'll put some text above the bar, displaying the actual values
-	libtcod.console_set_default_foreground(panel, libtcod.white)
-	libtcod.console_print_ex(panel, x + total_width / 2, y, libtcod.BKGND_NONE, libtcod.CENTER, "{0}: {1}/{2}".format(name, value, maximum))
-
-def menu(header, options, width):
-	if len(options) > 26:
-		raise ValueError("Cannot have a menu with more than 26 options")
-	
-	# Calculate total height for the header (after auto-wrap) and one line per options
-	header_height = libtcod.console_get_height_rect(con, 0, 0, width, SCREEN_HEIGHT, header)
-	height = len(options) + header_height
-	
-	# Create an off-screen console that represents the menu's window
-	window = libtcod.console_new(width, height)
-	
-	# Print the header, with auto-wrap
-	libtcod.console_set_default_foreground(window, libtcod.white)
-	libtcod.console_print_rect_ex(window, 0, 0, width, height, libtcod.BKGND_NONE, libtcod.LEFT, header)
-	
-	# Print all the options
-	y = header_height
-	letter_index = ord("a")
-	
-	for option_text in options:
-		text = "({0}) {1}".format(chr(letter_index), option_text)
-		libtcod.console_print_ex(window, 0, y, libtcod.BKGND_NONE, libtcod.LEFT, text)
-		y += 1
-		letter_index += 1
-
-	# Blit the contents of "window" to the root console
-	x = SCREEN_WIDTH / 2 - width / 2
-	y = SCREEN_HEIGHT / 2 - height / 2
-	
-	# The last two parameters of this next function control the foreground transparency
-	# and the background transparency, respectively
-	libtcod.console_blit(window, 0, 0, width, height, 0, x, y, 1.0, 0.7)
-	
-	# Present the root console to the player and wait for a key press
-	libtcod.console_flush()
-	key = libtcod.console_wait_for_keypress(True)
-	
-	# Convert the ASCII code to an index; if it corresponds to an option, return it
-	index = key.c - ord('a')
-	
-	if index >= 0 and index < len(options): return index
-	return None
-
-def inventory_menu(header):
-	# Show a menu with each item of the inventory as an option_text
-	if len(player.inventory) == 0:
-		options = ["Inventory is empty."]
-	else:
-		options = [item.name for item in player.inventory]
-		
-	index = menu(header, options, INVENTORY_WIDTH)
-	if index is None or not len(player.inventory): return None
-	return player.inventory[index].get_component("Item")	
-	
-def render_all():
-	if gameMap.fov_recompute:
-		# If the map needs to recompute the FOV map, do it once
-		gameMap.fov_recompute = False
-		gameMap.recompute_fov_map(player)
-			
-	for obj in gameMap.objects:
-		if obj != player:
-			obj.draw()
-	player.draw()
-	
-	gameMap.draw()
-		
-	# Blit contents on the 'con' console to the root console
-	libtcod.console_blit(con, 0, 0, MAP_WIDTH, MAP_HEIGHT, 0, 0, 0)
-	
-	# Prepare the gui panel for rendering
-	libtcod.console_set_default_background(panel, libtcod.black)
-	libtcod.console_clear(panel)
-	
-	# First we'll render the log messages
-	y = 1
-	for (line, color) in game_msgs:
-		libtcod.console_set_default_foreground(panel, color)
-		libtcod.console_print_ex(panel, MSG_X, y, libtcod.BKGND_NONE, libtcod.LEFT, line)
-		y += 1
-	
-	# Show the player's stats
-	render_bar(1, 1, BAR_WIDTH, "HP", player.get_component("Fighter").hp, player.get_component("Fighter").max_hp, libtcod.light_red, libtcod.darker_red)
-	
-	# Display the names of objects under the mouse
-	libtcod.console_set_default_foreground(panel, libtcod.light_grey)
-	libtcod.console_print_ex(panel, 1, 0, libtcod.BKGND_NONE, libtcod.LEFT, get_names_under_mouse())
-	
-	# Blit the contents of "panel" to the root console
-	libtcod.console_blit(panel, 0, 0, SCREEN_WIDTH, PANEL_HEIGHT, 0, 0, PANEL_Y)
-	
-	for obj in gameMap.objects:
-		obj.clear(con)
-		
-	# Flush changes to the screen (this updates what is visible on-screen)
-	libtcod.console_flush()
-	
-def get_names_under_mouse():
-	global mouse
-	
-	# Return a string with the names of all the objects under the mouse
-	(x, y) = (mouse.cx, mouse.cy)
-	
-	# Create a list with the names of all objects at the mouse's coordinates and in the FOV
-	names = [obj.name for obj in gameMap.objects if obj.x == x and obj.y == y and libtcod.map_is_in_fov(gameMap.fov_map, obj.x, obj.y)]
-	
-	names = ', '.join(names) # Joins all the names together, seperated by commas
-	
-	return names.capitalize()
-	
-def handle_keys():	
-	global FOV, generateMonsters, player, game_state, key
-		
-	if key.vk == libtcod.KEY_ENTER and key.lalt:
-		# This makes alt + enter toggle fullscreen
-		libtcod.console_set_fullscreen(not libtcod.console_is_fullscreen())
-	elif key.vk == libtcod.KEY_F1:
-		FOV = not FOV
-	elif key.vk == libtcod.KEY_F2:
-		generateMonsters = not generateMonsters
-	elif key.vk == libtcod.KEY_ESCAPE:
-		return "exit"	
-	
-	if game_state == "playing":
-		return player.get_input()
-	
-def new_game():
-	global game_msgs, gameMap, player, game_state
-	# This list holds all the GUI messages for the player
-	game_msgs = []
-	
-	# Initialize the game map and fov map
-	gameMap = GameMap()
-	gameMap.make_map()
-	gameMap.make_fov_map()
-	
-	# Create player with a fighter component
-	player = Player(gameMap.center_of_first_room[0], gameMap.center_of_first_room[1], '@', libtcod.white)
-	gameMap.objects.append(player)
-	
-	game_state = "playing"
-	
-	# Limit FPS
-	libtcod.sys_set_fps(LIMIT_FPS)
-
-	itemComp = Item(use_function=cast_fireball)
-	item = Object(0, 0, "#", "scroll of fireball", libtcod.orange, False, [itemComp])
-	player.inventory.append(item)
-
-	itemComp = Item(use_function=cast_lightning)
-	item = Object(0, 0, "#", "scroll of lightning bolt", libtcod.light_yellow, False, [itemComp])
-	player.inventory.append(item)
-
-	itemComp = Item(use_function=cast_confuse)
-	item = Object(0, 0, "#", "scroll of confusion", libtcod.light_purple, False, [itemComp])
-	player.inventory.append(item)
-	
-def play_game():
-	global mouse, key
-	
-	mouse = libtcod.Mouse()
-	key = libtcod.Key()
-		
-	player_action = None
-	
-	while not libtcod.console_is_window_closed():
-		libtcod.sys_check_for_event(libtcod.EVENT_KEY_PRESS | libtcod.EVENT_MOUSE, key, mouse)
-		
-		render_all()
-		
-		player_action = handle_keys()
-			
-		if player_action == "exit":
-			break
-		
-		player.update()
-		
-		for obj in gameMap.objects:
-			if obj != player and player_action:
-				obj.update()
 	
 class Component:
 	def __init__(self, name):
@@ -606,14 +296,7 @@ class GameMap(object):
 				self.place_objects(new_room)
 				rooms.append(new_room)
 				num_rooms += 1
-		self.make_fov_map()
-		
-	def make_fov_map(self):
-		self.fov_map = libtcod.map_new(MAP_WIDTH, MAP_HEIGHT)
-		
-		for y in range(MAP_HEIGHT):
-			for x in range(MAP_WIDTH):
-				libtcod.map_set_properties(self.fov_map, x, y, not self.map[x][y].block_sight, not self.map[x][y].blocked)
+		self.initialize_fov()
 	
 	def create_h_tunnel(self, x1, x2, y):
 		for x in range(min(x1, x2), max(x1, x2) + 1):
@@ -624,7 +307,18 @@ class GameMap(object):
 		for y in range(min(y1, y2), max(y1, y2) + 1):
 			self.map[x][y].blocked = False
 			self.map[x][y].block_sight = False
-			
+	
+	def initialize_fov(self):
+		self.fov_recompute = True
+		
+		libtcod.console_clear(con)
+		
+		# Create the FOV map, according to the generated map
+		self.fov_map = libtcod.map_new(MAP_WIDTH, MAP_HEIGHT)
+		for y in range(MAP_HEIGHT):
+			for x in range(MAP_WIDTH):
+				libtcod.map_set_properties(self.fov_map, x, y, not self.map[x][y].block_sight, not self.map[x][y].blocked)
+	
 	def recompute_fov_map(self, player):
 		libtcod.map_compute_fov(self.fov_map, player.x, player.y, player.view_radius, player.FOV_light_walls, player.FOV_algo)
 		
@@ -916,6 +610,364 @@ class Player(Object):
 			
 		return self.action
 
+def target_tile(max_range=None):
+	# Return the position of a tile left-clicked in player's FOV (optionally in a range),
+	# or (None, None) if right-clicked
+	global key, mouse
+	while True:
+		# Render the screen. This erases the inventory and shows the names of objects under the mouse.
+		libtcod.console_flush()
+		libtcod.sys_check_for_event(libtcod.EVENT_KEY_PRESS | libtcod.EVENT_MOUSE, key, mouse)
+		render_all()
+		
+		(x, y) = (mouse.cx, mouse.cy)
+		
+		# Accept the target if the player clicked in FOV, and, in case a range is specified, if it's within that range
+		if mouse.lbutton_pressed and libtcod.map_is_in_fov(gameMap.fov_map, x, y) and (max_range is None or player.distance(x, y) <= max_range):
+			return (x, y)
+			
+		if mouse.rbutton_pressed or key.vk == libtcod.KEY_ESCAPE:
+			return (None, None) # Cancel if the player right clicked or pressed escape
+
+def target_monster(max_range=None):
+	# Returns a clicked monster inside FOV up to a range, or None if right clicked
+	while True:
+		(x, y) = target_tile(max_range)
+		if x is None:	# Player cancelled
+			return None
+			
+		# Return the first clicked monster, otherwise continue looping
+		for obj in gameMap.objects:
+			if obj.position == (x, y) and obj.get_component("Fighter") and obj != player:
+				return obj
+			
+def cast_heal():
+	# Get the fighter component, and heal it
+	fComp = player.get_component("Fighter")
+	damageHealed = 0
+	if fComp:
+		damageHealed = fComp.max_hp - fComp.hp
+		if damageHealed:
+			fComp.hp = fComp.max_hp
+			message("You used the healing potion and healed {0} hit points!".format(damageHealed), libtcod.light_green)
+		else:
+			message("You already have full health.")
+			
+def cast_lightning():
+	# Find the closest enemy (inside a maximum range) and damage it
+	monster = player.closest_enemy(LIGHTNING_RANGE)
+	if monster is None: # Couldn't find a monster within range
+		message("No enemy is close enough to strike.", libtcod.red)
+		return "cancelled"
+	
+	# Zap it!
+	message("A lightning bolt strikes the {0} with a thunderous report! The {0} takes {1} damage.".format(monster.name, LIGHTNING_DAMAGE), libtcod.light_yellow)
+	monster.get_component("Fighter").take_damage(LIGHTNING_DAMAGE)
+
+def cast_confuse():
+	# Ask the player for a target to confuse
+	message("Left click an enemy to confuse it, or right click to cancel.", libtcod.light_cyan)
+	monster = target_monster(CONFUSE_RANGE)
+	if monster is None: return "cancelled"
+	
+	# Replace the monster's AI with a "confused" one; after some turns it will restore the old AI
+	old_ai = monster.get_component("BasicMonster")
+	new_ai = ConfusedMonster(old_ai)
+	old_ai.active = False
+	monster.add_component(new_ai)
+	message("The eyes of the {0} turn glassy and vacant as he stumbles in confusion!".format(monster.name), libtcod.light_green)
+
+def cast_fireball():
+	# Ask the player for a target tile to throw a fireball at
+	message("Left click a target tile for the fireball, or right click to cancel.", libtcod.light_cyan)
+	(x, y) = target_tile()
+	if x is None: return "cancelled"
+	
+	message("The fireball explodes, burning everything within {0} tiles!".format(FIREBALL_RADIUS), libtcod.orange)
+	for obj in gameMap.objects: # Damage every fighter within range, including the player
+		if obj.distance(x, y) <= FIREBALL_RADIUS and obj.get_component("Fighter"):
+			message("The {0} gets burned for {1} hit points.".format(obj.name, FIREBALL_DAMAGE))
+			obj.get_component("Fighter").take_damage(FIREBALL_DAMAGE)
+	
+def player_death(player):
+	global game_state
+	message("You died!", libtcod.light_red)
+	game_state = "dead"
+	
+	player.char = '%'
+	player.color = libtcod.dark_red
+
+def monster_death(monster):
+	message(monster.name.capitalize() + " is dead!", libtcod.light_blue)
+	monster.char = '%'
+	monster.color = libtcod.dark_red
+	monster.blocks = False
+	monster.remove_component("Fighter")
+	monster.remove_component("BasicMonster")
+	monster.name = "Remains of " + monster.name
+	monster.send_to_back()
+
+def message(new_msg, color = libtcod.white):
+	# First we'll split the message if necessary into multiple lines (text wrapping)
+	new_msg_lines = textwrap.wrap(new_msg, MSG_WIDTH)
+	
+	for line in new_msg_lines:
+		# If the buffer is full, remove the first line to make room for the
+		# new line.
+		if len(game_msgs) == MSG_HEIGHT:
+			del game_msgs[0]
+		
+		# Add the new line as a tuple, with the text and the color
+		game_msgs.append((line, color))
+	
+def render_bar(x, y, total_width, name, value, maximum, bar_color, back_color):
+	# Renders a status bar (for HP, experience points, etc.)
+	
+	# First we'll calculate the width of the bar
+	bar_width = int(float(value) / maximum * total_width)
+	
+	# Then we'll render the background
+	libtcod.console_set_default_background(panel, back_color)
+	libtcod.console_rect(panel, x, y, total_width, 1, False, libtcod.BKGND_SCREEN)
+	
+	# Now we render the bar on top of the background
+	libtcod.console_set_default_background(panel, back_color)
+	if bar_width > 0:
+		libtcod.console_rect(panel, x, y, bar_width, 1, False, libtcod.BKGND_SCREEN)
+		
+	# And now we'll put some text above the bar, displaying the actual values
+	libtcod.console_set_default_foreground(panel, libtcod.white)
+	libtcod.console_print_ex(panel, x + total_width / 2, y, libtcod.BKGND_NONE, libtcod.CENTER, "{0}: {1}/{2}".format(name, value, maximum))
+
+def menu(header, options, width):
+	global key, mouse
+	
+	if len(options) > 26:
+		raise ValueError("Cannot have a menu with more than 26 options")
+	
+	# Calculate total height for the header (after auto-wrap) and one line per options
+	if header == "":
+		header_height = 0
+	else:
+		header_height = libtcod.console_get_height_rect(con, 0, 0, width, SCREEN_HEIGHT, header)
+	height = len(options) + header_height
+	
+	# Create an off-screen console that represents the menu's window
+	window = libtcod.console_new(width, height)
+	
+	# Print the header, with auto-wrap
+	libtcod.console_set_default_foreground(window, libtcod.white)
+	libtcod.console_print_rect_ex(window, 0, 0, width, height, libtcod.BKGND_NONE, libtcod.LEFT, header)
+	
+	# Print all the options
+	y = header_height
+	letter_index = ord("a")
+	
+	for option_text in options:
+		text = "({0}) {1}".format(chr(letter_index), option_text)
+		libtcod.console_print_ex(window, 0, y, libtcod.BKGND_NONE, libtcod.LEFT, text)
+		y += 1
+		letter_index += 1
+
+	# Calculate coordinates
+	x = SCREEN_WIDTH / 2 - width / 2
+	y = SCREEN_HEIGHT / 2 - height / 2
+	
+	# Compute x and y offsets to convert console position to menu position
+	x_offset = x # x is the left edge of the menu
+	y_offset = y + header_height # The top edge of the menu
+	
+	# Now we'll blit the contents of "window" to the root console
+	# The last two parameters of this next function control the foreground transparency
+	# and the background transparency, respectively
+	libtcod.console_blit(window, 0, 0, width, height, 0, x, y, 1.0, 0.7)
+	
+	while True:
+		# Present the root console to the player and wait for a key press
+		libtcod.console_flush()
+		libtcod.sys_check_for_event(libtcod.EVENT_KEY_PRESS|libtcod.EVENT_MOUSE, key, mouse)
+		
+		if mouse.lbutton_pressed:
+			(menu_x, menu_y) = (mouse.cx - x_offset, mouse.cy - y_offset)
+			
+			# Check if click is within the menu and on a choice
+			if menu_x >= 0 and menu_x < width and menu_y >= 0 and menu_y < height - header_height:
+				return menu_y
+				
+		if mouse.rbutton_pressed or key.vk == libtcod.KEY_ESCAPE:
+			return None # Cancel if the player right clicked or hit escape
+		
+		if key.vk == libtcod.KEY_ENTER and key.lalt: # Check for alt + enter to fullscreen
+			libtcod.console_set_fullscreen(not libtcod.console_is_fullscreen())
+		
+		# Convert the ASCII code to an index; if it corresponds to an option, return it
+		index = key.c - ord('a')
+		if index >= 0 and index < len(options): return index
+		
+		# If they hit a letter that is not an option, return None
+		if index >= 0 and index <= 26: return None
+
+def inventory_menu(header):
+	# Show a menu with each item of the inventory as an option_text
+	if len(player.inventory) == 0:
+		options = ["Inventory is empty."]
+	else:
+		options = [item.name for item in player.inventory]
+		
+	index = menu(header, options, INVENTORY_WIDTH)
+	if index is None or not len(player.inventory): return None
+	return player.inventory[index].get_component("Item")	
+
+def render_all():
+	if gameMap.fov_recompute:
+		# If the map needs to recompute the FOV map, do it once
+		gameMap.fov_recompute = False
+		gameMap.recompute_fov_map(player)
+			
+	for obj in gameMap.objects:
+		if obj != player:
+			obj.draw()
+	player.draw()
+	
+	gameMap.draw()
+		
+	# Blit contents on the 'con' console to the root console
+	libtcod.console_blit(con, 0, 0, MAP_WIDTH, MAP_HEIGHT, 0, 0, 0)
+	
+	# Prepare the gui panel for rendering
+	libtcod.console_set_default_background(panel, libtcod.black)
+	libtcod.console_clear(panel)
+	
+	# First we'll render the log messages
+	y = 1
+	for (line, color) in game_msgs:
+		libtcod.console_set_default_foreground(panel, color)
+		libtcod.console_print_ex(panel, MSG_X, y, libtcod.BKGND_NONE, libtcod.LEFT, line)
+		y += 1
+	
+	# Show the player's stats
+	render_bar(1, 1, BAR_WIDTH, "HP", player.get_component("Fighter").hp, player.get_component("Fighter").max_hp, libtcod.light_red, libtcod.darker_red)
+	
+	# Display the names of objects under the mouse
+	libtcod.console_set_default_foreground(panel, libtcod.light_grey)
+	libtcod.console_print_ex(panel, 1, 0, libtcod.BKGND_NONE, libtcod.LEFT, get_names_under_mouse())
+	
+	# Blit the contents of "panel" to the root console
+	libtcod.console_blit(panel, 0, 0, SCREEN_WIDTH, PANEL_HEIGHT, 0, 0, PANEL_Y)
+	
+	for obj in gameMap.objects:
+		obj.clear(con)
+		
+	# Flush changes to the screen (this updates what is visible on-screen)
+	libtcod.console_flush()
+	
+def get_names_under_mouse():
+	global mouse
+	
+	# Return a string with the names of all the objects under the mouse
+	(x, y) = (mouse.cx, mouse.cy)
+	
+	# Create a list with the names of all objects at the mouse's coordinates and in the FOV
+	names = [obj.name for obj in gameMap.objects if obj.x == x and obj.y == y and libtcod.map_is_in_fov(gameMap.fov_map, obj.x, obj.y)]
+	
+	names = ', '.join(names) # Joins all the names together, seperated by commas
+	
+	return names.capitalize()
+	
+def handle_keys():	
+	global FOV, generateMonsters, player, game_state, key
+		
+	if key.vk == libtcod.KEY_ENTER and key.lalt:
+		# This makes alt + enter toggle fullscreen
+		libtcod.console_set_fullscreen(not libtcod.console_is_fullscreen())
+	elif key.vk == libtcod.KEY_ESCAPE:
+		return "exit"	
+	elif chr(key.c) == "r":
+		new_game()
+		play_game()
+	
+	if game_state == "playing":
+		return player.get_input()
+	
+def new_game():
+	global game_msgs, gameMap, player, game_state
+	libtcod.console_flush()
+	
+	# This list holds all the GUI messages for the player
+	game_msgs = []
+	
+	# Initialize the game map and fov map
+	gameMap = GameMap()
+	gameMap.make_map()
+	gameMap.initialize_fov()
+	
+	# Create player with a fighter component
+	player = Player(gameMap.center_of_first_room[0], gameMap.center_of_first_room[1], '@', libtcod.white)
+	gameMap.objects.append(player)
+	
+	game_state = "playing"
+	
+	# Limit FPS
+	libtcod.sys_set_fps(LIMIT_FPS)
+
+	itemComp = Item(use_function=cast_fireball)
+	item = Object(0, 0, "#", "scroll of fireball", libtcod.orange, False, [itemComp])
+	player.inventory.append(item)
+
+	itemComp = Item(use_function=cast_lightning)
+	item = Object(0, 0, "#", "scroll of lightning bolt", libtcod.light_yellow, False, [itemComp])
+	player.inventory.append(item)
+
+	itemComp = Item(use_function=cast_confuse)
+	item = Object(0, 0, "#", "scroll of confusion", libtcod.light_purple, False, [itemComp])
+	player.inventory.append(item)
+	
+	gameMap.initialize_fov()
+	
+def play_game():
+	global mouse, key
+		
+	player_action = None
+	
+	while not libtcod.console_is_window_closed():
+		libtcod.sys_check_for_event(libtcod.EVENT_KEY_PRESS | libtcod.EVENT_MOUSE, key, mouse)
+		
+		render_all()
+		
+		player_action = handle_keys()
+			
+		if player_action == "exit":
+			break
+		
+		player.update()
+		
+		for obj in gameMap.objects:
+			if obj != player and player_action:
+				obj.update()
+		
+def main_menu():
+	img = libtcod.image_load("menu_background.png")
+	
+	while not libtcod.console_is_window_closed():
+		# Show the background image, at twice the regular console resolution
+		libtcod.image_blit_2x(img, 0, 0, 0)
+		
+		# Show the game's title and credits
+		libtcod.console_set_default_foreground(0, libtcod.light_blue)
+		libtcod.console_print_ex(0, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 6, libtcod.BKGND_NONE, libtcod.CENTER, "Roguelike thinger")
+		libtcod.console_print_ex(0, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 4, libtcod.BKGND_NONE, libtcod.CENTER, "Written by Cody Kelly and Roguebasin")
+		
+		
+		# Show options and wait for the player's choice
+		choice = menu("", ["Start a new game", "Continue last game", "Quit"], 24)
+		
+		if choice == 0: # New game
+			new_game()
+			play_game()
+		elif choice == 2: # Quit
+			break
+	
 if __name__ == "__main__":
-	new_game()
-	play_game()
+	mouse = libtcod.Mouse()
+	key = libtcod.Key()
+	main_menu()
