@@ -1,6 +1,8 @@
 import libtcodpy as libtcod
 import math
 import textwrap
+import shelve
+import sys
 
 ################################################################################
 #                               GLOBAL VARIABLES                               #
@@ -49,6 +51,9 @@ panel = libtcod.console_new(SCREEN_WIDTH, PANEL_HEIGHT)
 
 # Set the default console window to 'con', this is the main window
 libtcod.console_set_default_foreground(0, libtcod.white)
+
+# Limit FPS
+libtcod.sys_set_fps(LIMIT_FPS)
 	
 class Component:
 	def __init__(self, name):
@@ -188,7 +193,7 @@ class Tile(object):
 		self.block_sight = block_sight
 
 class GameMap(object):
-	def __init__(self):
+	def __init__(self, map = [], objs = []):
 		# Tile colors
 		self.color_dark_wall = libtcod.Color(0, 0, 100)
 		self.color_light_wall = libtcod.Color(130, 110, 50)
@@ -205,7 +210,8 @@ class GameMap(object):
 		# Tells the game if the fov map needs to be recomputed
 		self.fov_recompute = True
 		
-		self.objects = []
+		self.objects = objs
+		self.map = map
 				
 	def draw(self):
 		for y in range(MAP_HEIGHT):
@@ -702,8 +708,7 @@ def monster_death(monster):
 	monster.char = '%'
 	monster.color = libtcod.dark_red
 	monster.blocks = False
-	monster.remove_component("Fighter")
-	monster.remove_component("BasicMonster")
+	monster.components = []
 	monster.name = "Remains of " + monster.name
 	monster.send_to_back()
 
@@ -807,6 +812,9 @@ def menu(header, options, width):
 		# If they hit a letter that is not an option, return None
 		if index >= 0 and index <= 26: return None
 
+def msgbox(text, width = 50):
+	menu(text, [], width) # Use menu() as a sort of message box
+		
 def inventory_menu(header):
 	# Show a menu with each item of the inventory as an option_text
 	if len(player.inventory) == 0:
@@ -889,6 +897,30 @@ def handle_keys():
 	if game_state == "playing":
 		return player.get_input()
 	
+def save_game():
+	# Open a new empty shelve (possibly overwriting an old one) to write the game data
+	file = shelve.open('savegame', 'n')
+	file['gameMap'] = gameMap
+	file['player_index'] = gameMap.objects.index(player) # Index of player in objects list
+	file['game_msgs'] = game_msgs
+	file['game_state'] = game_state
+	file.close()
+
+def load_game():
+	# Open the previously save shelve and load the game data
+	global gameMap, player, game_msgs, game_state
+	
+	file = shelve.open('savegame', "r")
+	
+	game_msgs = file['game_msgs']
+	gameMap = file['gameMap']
+	player = gameMap.objects[file['player_index']]
+	game_state = file['game_state']
+	
+	gameMap.initialize_fov()
+
+	file.close()
+	
 def new_game():
 	global game_msgs, gameMap, player, game_state
 	libtcod.console_flush()
@@ -906,9 +938,6 @@ def new_game():
 	gameMap.objects.append(player)
 	
 	game_state = "playing"
-	
-	# Limit FPS
-	libtcod.sys_set_fps(LIMIT_FPS)
 
 	itemComp = Item(use_function=cast_fireball)
 	item = Object(0, 0, "#", "scroll of fireball", libtcod.orange, False, [itemComp])
@@ -937,6 +966,7 @@ def play_game():
 		player_action = handle_keys()
 			
 		if player_action == "exit":
+			save_game()
 			break
 		
 		player.update()
@@ -963,6 +993,9 @@ def main_menu():
 		
 		if choice == 0: # New game
 			new_game()
+			play_game()
+		elif choice == 1: # Load last game
+			load_game()
 			play_game()
 		elif choice == 2: # Quit
 			break
