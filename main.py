@@ -322,7 +322,7 @@ class GameMap(object):
 		self.initialize_fov()
 		
 		# Create stairs at the center of the last room
-		self.stairs = Object(newX, newY, "<", "stairs", libtcod.white)
+		self.stairs = Object(newX, newY, "<", "stairs", libtcod.white, always_visible=True)
 		self.objects.append(self.stairs)
 		self.stairs.send_to_back() # So it's drawn below the monsters
 	
