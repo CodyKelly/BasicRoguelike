@@ -329,7 +329,7 @@ class GameMap(object):
 	def next_level(self):
 		# Advance to the next level
 		message("You take a moment to rest and regain strength.", libtcod.light_green)
-		player.get_component("Fighter").heal(player.get_component("Fighter").max_hp / 2)
+		player.get_component("Fighter").heal(amount=player.get_component("Fighter").max_hp / 2)
 		
 		message("After a rare moment of peace, you descend deeper into the heart of the dungeon...", libtcod.light_red)
 		self.objects = [player]
