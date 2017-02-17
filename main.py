@@ -91,6 +91,16 @@ class Fighter(Component):
 			if function is not None:
 				function(self.owner)
 			
+	def heal(self, full=False, amount=0, ignore_max_hp=False):
+		old_hp = self.hp
+		if self.hp + amount > self.max_hp and not ignore_max_hp:
+			self.hp = self.max_hp
+		else:
+			self.hp += amount
+			
+		# Return amount healed
+		return self.hp - old_hp
+			
 	def attack(self, target):
 		damage = self.power - target.get_component("Fighter").defense
 		
@@ -160,6 +170,8 @@ class Item(Component):
 		else:
 			if self.use_function() != 'cancelled':
 				player.inventory.remove(self.owner) # Destroy after use, unless it was cancelled for some reason
+			else:
+				return "cancelled"
 				
 	def drop(self):
 		# Add to the map and remove from the player's inventory. 
@@ -313,7 +325,19 @@ class GameMap(object):
 		self.stairs = Object(newX, newY, "<", "stairs", libtcod.white)
 		self.objects.append(self.stairs)
 		self.stairs.send_to_back() # So it's drawn below the monsters
+	
+	def next_level(self):
+		# Advance to the next level
+		message("You take a moment to rest and regain strength.", libtcod.light_green)
+		player.get_component("Fighter").heal(player.get_component("Fighter").max_hp / 2)
 		
+		message("After a rare moment of peace, you descend deeper into the heart of the dungeon...", libtcod.light_red)
+		self.objects = [player]
+		self.make_map() # Create a fresh level
+		player.position = self.center_of_first_room
+		self.dungeon_level += 1
+		self.initialize_fov()
+	
 	def create_h_tunnel(self, x1, x2, y):
 		for x in range(min(x1, x2), max(x1, x2) + 1):
 			self.map[x][y].blocked = False
@@ -360,13 +384,13 @@ class GameMap(object):
 				fighter_component = Fighter(hp = 10, defense = 0, power = 3, death_function=monster_death)
 				ai_component = BasicMonster()
 				
-				monster = Object(x, y, 'o', "Orc", libtcod.desaturated_green, blocks=True, components=[fighter_component, ai_component])
+				monster = Object(x, y, 'o', "Orc", libtcod.desaturated_green, blocks=True, always_visible = True, components=[fighter_component, ai_component])
 			else:
 				# Create a troll
 				fighter_component = Fighter(hp = 16, defense = 1, power = 4, death_function=monster_death)
 				ai_component = BasicMonster()
 				
-				monster = Object(x, y, 'T', "Troll", libtcod.darker_green, blocks=True, components=[fighter_component, ai_component])
+				monster = Object(x, y, 'T', "Troll", libtcod.darker_green, blocks=True, always_visible = True, components=[fighter_component, ai_component])
 				
 			if not monster.is_blocked(x, y):
 				self.objects.append(monster)
@@ -384,19 +408,19 @@ class GameMap(object):
 			if dice < 60:
 				# Create a healing potion
 				itemComp = Item(use_function=cast_heal)
-				item = Object(x, y, "!", "healing potion", libtcod.violet, False, [itemComp])
+				item = Object(x, y, "!", "healing potion", libtcod.violet, False, True, [itemComp])
 			elif dice < 75:
 				# Create a lightning spell
 				itemComp = Item(use_function=cast_lightning)
-				item = Object(x, y, "#", "scroll of lightning bolt", libtcod.light_yellow, False, [itemComp])
+				item = Object(x, y, "#", "scroll of lightning bolt", libtcod.light_yellow, False, True, [itemComp])
 			elif dice < 85:
 				# Create a fireball spell
 				itemComp = Item(use_function=cast_fireball)
-				item = Object(x, y, "#", "scroll of fireball", libtcod.orange, False, [itemComp])
+				item = Object(x, y, "#", "scroll of fireball", libtcod.orange, False, True, [itemComp])
 			else:
 				# Create a confuse scroll
 				itemComp = Item(use_function=cast_confuse)
-				item = Object (x, y, "#", "scroll of confusion", libtcod.light_purple, False, [itemComp])
+				item = Object (x, y, "#", "scroll of confusion", libtcod.light_purple, False, True, [itemComp])
 				
 			# We'll only place it if the tile isn't blocked
 			if not item.is_blocked(x, y):
@@ -406,9 +430,10 @@ class GameMap(object):
 class Object(object):
 # This object class represents every visible object on the screen,
 # shown with a character
-	def __init__(self, x, y, char, name, color, blocks = False, components=[]):
+	def __init__(self, x, y, char, name, color, blocks = False, always_visible = False, components=[]):
 		self.name = name
 		self.blocks = blocks
+		self.always_visible = always_visible
 		self.x = x
 		self.y = y
 		self.char = char
@@ -427,7 +452,7 @@ class Object(object):
 	def draw(self):
 		global ignore_FOV
 		# Draws the object's character from the screen
-		if libtcod.map_is_in_fov(gameMap.fov_map, self.x, self.y) or ignore_FOV:
+		if libtcod.map_is_in_fov(gameMap.fov_map, self.x, self.y) or (self.always_visible and gameMap.map[self.x][self.y].explored) or ignore_FOV:
 			libtcod.console_set_default_foreground(con, self.color)
 			libtcod.console_put_char(con, self.x, self.y, self.char, libtcod.BKGND_NONE)
 			
@@ -664,8 +689,8 @@ class Player(Object):
 				# Show inventory
 				chosenItem = inventory_menu("Press the key next to an item to use it, or any other to cancel.\n")
 				if chosenItem:
-					chosenItem.use()
-					return "used_item"
+					if not chosenItem.use() == "cancelled":
+						return "used_item"
 					
 			elif key_char == "d":
 				# Show inventory
@@ -674,11 +699,13 @@ class Player(Object):
 					chosenItem.drop()
 					return "dropped_item"
 			
+			elif key_char == "c":
+				# Climb to the next level of the dungeon (if on stairs)
+				if self.position == gameMap.stairs.position:
+					gameMap.next_level()
+			
 			elif key_char == ".":
 				return "didnt_take_turn"
-				
-			elif key_char == "<":
-				gameMap.next_level()
 			
 		return self.action
 
@@ -716,14 +743,13 @@ def target_monster(max_range=None):
 def cast_heal():
 	# Get the fighter component, and heal it
 	fComp = player.get_component("Fighter")
-	damageHealed = 0
 	if fComp:
-		damageHealed = fComp.max_hp - fComp.hp
+		damageHealed = fComp.heal(amount=10)
 		if damageHealed:
-			fComp.hp = fComp.max_hp
 			message("You used the healing potion and healed {0} hit points!".format(damageHealed), libtcod.light_green)
 		else:
 			message("You already have full health.")
+			return "cancelled"
 			
 def cast_lightning():
 	# Find the closest enemy (inside a maximum range) and damage it
@@ -945,7 +971,7 @@ def get_names_under_mouse():
 	(x, y) = (mouse.cx, mouse.cy)
 	
 	# Create a list with the names of all objects at the mouse's coordinates and in the FOV
-	names = [obj.name for obj in gameMap.objects if obj.x == x and obj.y == y and (libtcod.map_is_in_fov(gameMap.fov_map, obj.x, obj.y) or ignore_FOV)]
+	names = [obj.name for obj in gameMap.objects if obj.x == x and obj.y == y and (libtcod.map_is_in_fov(gameMap.fov_map, obj.x, obj.y) or ignore_FOV or (obj.always_visible and gameMap.map[obj.x][obj.y].explored))]
 	
 	names = ', '.join(names) # Joins all the names together, seperated by commas
 	
@@ -959,13 +985,6 @@ def handle_keys():
 		libtcod.console_set_fullscreen(not libtcod.console_is_fullscreen())
 	elif key.vk == libtcod.KEY_ESCAPE:
 		return "exit"	
-	elif chr(key.c) == "r":
-		new_game()
-		play_game()
-	elif chr(key.c) == "<":
-		# go down stairs, if the player is on them
-		if gameMap.stairs.position == self.position:
-			next_level()
 	elif key.vk == libtcod.KEY_F1:
 		ignore_FOV = not ignore_FOV
 	
@@ -1003,6 +1022,7 @@ def new_game():
 	
 	# Initialize the game map and fov map
 	gameMap = GameMap()
+	gameMap.objects = []
 	gameMap.make_map()
 	gameMap.initialize_fov()
 	
@@ -1013,15 +1033,16 @@ def new_game():
 	game_state = "playing"
 
 	itemComp = Item(use_function=cast_fireball)
-	item = Object(0, 0, "#", "scroll of fireball", libtcod.orange, False, [itemComp])
+	item = Object(0, 0, "#", "scroll of fireball", libtcod.orange, False, True, [itemComp])
 	player.inventory.append(item)
 
 	itemComp = Item(use_function=cast_lightning)
-	item = Object(0, 0, "#", "scroll of lightning bolt", libtcod.light_yellow, False, [itemComp])
+	item = Object(0, 0, "#", "scroll of lightning bolt", libtcod.light_yellow, False, True, [itemComp])
 	player.inventory.append(item)
 
 	itemComp = Item(use_function=cast_confuse)
-	item = Object(0, 0, "#", "scroll of confusion", libtcod.light_purple, False, [itemComp])
+
+	item = Object(0, 0, "#", "scroll of confusion", libtcod.light_purple, False, True, [itemComp])
 	player.inventory.append(item)
 	
 	gameMap.initialize_fov()
@@ -1047,16 +1068,6 @@ def play_game():
 		for obj in gameMap.objects:
 			if obj != player and player_action:
 				obj.update()
-
-def next_level():
-	# Advance to the next level
-	message("You take a moment to rest and regain strength.", libtcod.light_green)
-	player.fighter.heal(player.get_component("Fighter").max_hp / 2)
-	
-	message("After a rare moment of peace, you descend deeper into the heart of the dungeon...", libtcod.light_red)
-	gameMap.make_map() # Create a fresh level
-	gameMap.dungeon_level += 1
-	gameMap.initialize_fov()
 				
 def main_menu():
 	img = libtcod.image_load("menu_background.png")
