@@ -54,6 +54,9 @@ libtcod.console_set_default_foreground(0, libtcod.white)
 
 # Limit FPS
 libtcod.sys_set_fps(LIMIT_FPS)
+
+ignore_FOV = False
+stairs = None
 	
 class Component:
 	def __init__(self, name):
@@ -113,7 +116,7 @@ class BasicMonster(Component):
 		if libtcod.map_is_in_fov(monster.get_fov_map(), monster.x, monster.y):
 		
 			if monster.distance_to(player) >= 2:
-				monster.move_towards(player.x, player.y)
+				monster.move_astar(player)
 			
 			elif player.get_component("Fighter").hp > 0:
 				monster.get_component("Fighter").attack(player)		
@@ -212,11 +215,13 @@ class GameMap(object):
 		
 		self.objects = objs
 		self.map = map
+		self.dungeon_level = 1
 				
 	def draw(self):
+		global ignore_FOV
 		for y in range(MAP_HEIGHT):
 			for x in range(MAP_WIDTH):
-				visible = libtcod.map_is_in_fov(self.fov_map, x, y)
+				visible = libtcod.map_is_in_fov(self.fov_map, x, y) or ignore_FOV
 				wall = self.map[x][y].block_sight
 				if not visible:
 					# If the tile isn't visible by the player, first check to see 
@@ -303,7 +308,12 @@ class GameMap(object):
 				rooms.append(new_room)
 				num_rooms += 1
 		self.initialize_fov()
-	
+		
+		# Create stairs at the center of the last room
+		self.stairs = Object(newX, newY, "<", "stairs", libtcod.white)
+		self.objects.append(self.stairs)
+		self.stairs.send_to_back() # So it's drawn below the monsters
+		
 	def create_h_tunnel(self, x1, x2, y):
 		for x in range(min(x1, x2), max(x1, x2) + 1):
 			self.map[x][y].blocked = False
@@ -415,10 +425,12 @@ class Object(object):
 			self.y += dy
 		
 	def draw(self):
+		global ignore_FOV
 		# Draws the object's character from the screen
-		if libtcod.map_is_in_fov(gameMap.fov_map, self.x, self.y):
+		if libtcod.map_is_in_fov(gameMap.fov_map, self.x, self.y) or ignore_FOV:
 			libtcod.console_set_default_foreground(con, self.color)
 			libtcod.console_put_char(con, self.x, self.y, self.char, libtcod.BKGND_NONE)
+			
 	def clear(self, con):
 		# Erases the object's character from the screen
 		libtcod.console_put_char(con, self.x, self.y, ' ', libtcod.BKGND_NONE)
@@ -446,9 +458,9 @@ class Object(object):
 		
 		return False
 	
-	def move_towards(self, target_x, target_y):
-		dx = target_x - self.x
-		dy = target_y - self.y
+	def move_towards(self, target):
+		dx = target.x - self.x
+		dy = target.y - self.y
 		
 		distance = math.sqrt(dx ** 2 + dy ** 2)
 		
@@ -456,6 +468,52 @@ class Object(object):
 		dy = int(round(dy / distance))
 		
 		self.move(dx, dy)
+	
+	def move_astar(self, target):
+		# Moves object towards a target using the A* pathfinding algorithm
+		
+		# Create a FOV map that has the dimensions of the map
+		fov = libtcod.map_new(MAP_WIDTH, MAP_HEIGHT)
+		
+		# Scane the current map each turn and set all the walls as unwalkable
+		for y1 in range(MAP_HEIGHT):
+			for x1 in range(MAP_WIDTH):
+				libtcod.map_set_properties(fov, x1, y1, not gameMap.map[x1][y1].block_sight, not gameMap.map[x1][y1].blocked)
+				
+		# Scan all the objects to see if there are objects that must be navigated around
+		# Also check that the objects isn't self or the target (so that the start and the end points are free
+		# The AI class handles the situation if self is next to the target so it will not use this A* function anyway
+		for obj in gameMap.objects:
+			if obj.blocks and obj != self and obj != target:
+				# Set the tile as a wall so it must be navigated around
+				libtcod.map_set_properties(fov, obj.x, obj.y, True, False)
+		
+		# Allocate an A* path
+		# The 1.41 is the normal diagonal cost of moving, it can be set as 0.0 if diagonal moves are prohibited 
+		my_path = libtcod.path_new_using_map(fov, 1.41)
+		
+		# Compute the path between self's coordinates and the target's coordinates
+		libtcod.path_compute(my_path, self.x, self.y, target.x, target.y)
+		
+		# Check if the path exists, and in this case, also the path is shorter than 25 tiles
+		# The path size matters if you want the monster to use alternative longer paths
+		# (for example through other rooms) if for example the player is in a corridor.
+		# It makes sense to keep path size relatively low to keep the monsters from running
+		# around the map if there's an alternative path really far away
+		if not libtcod.path_is_empty(my_path) and libtcod.path_size(my_path) < 25:
+			# Find the next coordinates in the computed full path
+			(x, y) = libtcod.path_walk(my_path, True)
+			if x or y:
+				self.position = (x, y)
+		
+		else:
+			# Keep the old move function as a backup so that if there are no paths (for example another 
+			# monster blocks a corridor) it will still try to move towards the player
+			# (closer to the corridor opening)
+			self.move_towards(target)
+			
+		# Delete the path to free memory
+		libtcod.path_delete(my_path)
 	
 	def distance_to(self, other):
 		# Returns the distance to another object
@@ -527,13 +585,14 @@ class Object(object):
 	
 class Player(Object):
 	def __init__(self, x, y, char, color, comps=[]):
-		Object.__init__(self, x, y, char, "Player", color, blocks=True, components=comps)
+		Object.__init__(self, x, y, char, "Player", color, blocks=True)
 		
 		self.FOV_algo = 0 # Default Field Of View algorithm
 		self.FOV_light_walls = True
 		
 		self.view_radius = 10
 		
+		self.components = []
 		# Player automatically gets a fighter component
 		self.add_component(Fighter(hp = 30, defense = 2, power = 5, death_function=player_death))
 		
@@ -543,6 +602,10 @@ class Player(Object):
 	
 	def update(self):
 		super(Player, self).update()
+		if ignore_FOV:
+			self.view_radius = 10000
+		else:
+			self.view_radius = 10
 	
 	def move_or_attack(self, dx, dy):
 		global fov_recompute
@@ -613,6 +676,9 @@ class Player(Object):
 			
 			elif key_char == ".":
 				return "didnt_take_turn"
+				
+			elif key_char == "<":
+				gameMap.next_level()
 			
 		return self.action
 
@@ -856,6 +922,9 @@ def render_all():
 	# Show the player's stats
 	render_bar(1, 1, BAR_WIDTH, "HP", player.get_component("Fighter").hp, player.get_component("Fighter").max_hp, libtcod.light_red, libtcod.darker_red)
 	
+	# Show the current dungeon level
+	libtcod.console_print_ex(panel, 1, 3, libtcod.BKGND_NONE, libtcod.LEFT, "Dungeon level {0}".format(gameMap.dungeon_level))
+	
 	# Display the names of objects under the mouse
 	libtcod.console_set_default_foreground(panel, libtcod.light_grey)
 	libtcod.console_print_ex(panel, 1, 0, libtcod.BKGND_NONE, libtcod.LEFT, get_names_under_mouse())
@@ -876,14 +945,14 @@ def get_names_under_mouse():
 	(x, y) = (mouse.cx, mouse.cy)
 	
 	# Create a list with the names of all objects at the mouse's coordinates and in the FOV
-	names = [obj.name for obj in gameMap.objects if obj.x == x and obj.y == y and libtcod.map_is_in_fov(gameMap.fov_map, obj.x, obj.y)]
+	names = [obj.name for obj in gameMap.objects if obj.x == x and obj.y == y and (libtcod.map_is_in_fov(gameMap.fov_map, obj.x, obj.y) or ignore_FOV)]
 	
 	names = ', '.join(names) # Joins all the names together, seperated by commas
 	
 	return names.capitalize()
 	
 def handle_keys():	
-	global FOV, generateMonsters, player, game_state, key
+	global FOV, generateMonsters, player, game_state, key, ignore_FOV
 		
 	if key.vk == libtcod.KEY_ENTER and key.lalt:
 		# This makes alt + enter toggle fullscreen
@@ -893,6 +962,12 @@ def handle_keys():
 	elif chr(key.c) == "r":
 		new_game()
 		play_game()
+	elif chr(key.c) == "<":
+		# go down stairs, if the player is on them
+		if gameMap.stairs.position == self.position:
+			next_level()
+	elif key.vk == libtcod.KEY_F1:
+		ignore_FOV = not ignore_FOV
 	
 	if game_state == "playing":
 		return player.get_input()
@@ -922,9 +997,7 @@ def load_game():
 	file.close()
 	
 def new_game():
-	global game_msgs, gameMap, player, game_state
-	libtcod.console_flush()
-	
+	global game_msgs, gameMap, player, game_state	
 	# This list holds all the GUI messages for the player
 	game_msgs = []
 	
@@ -974,7 +1047,17 @@ def play_game():
 		for obj in gameMap.objects:
 			if obj != player and player_action:
 				obj.update()
-		
+
+def next_level():
+	# Advance to the next level
+	message("You take a moment to rest and regain strength.", libtcod.light_green)
+	player.fighter.heal(player.get_component("Fighter").max_hp / 2)
+	
+	message("After a rare moment of peace, you descend deeper into the heart of the dungeon...", libtcod.light_red)
+	gameMap.make_map() # Create a fresh level
+	gameMap.dungeon_level += 1
+	gameMap.initialize_fov()
+				
 def main_menu():
 	img = libtcod.image_load("menu_background.png")
 	
