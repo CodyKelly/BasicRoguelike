@@ -659,17 +659,25 @@ class Player(Object):
 		global key
 		self.action = None
 		
-		if(key.vk == libtcod.KEY_UP):
+		# Movement keys
+		if key.vk == libtcod.KEY_UP or key.vk == libtcod.KEY_KP8:
 			self.move_or_attack(0, -1)
-	
-		elif(key.vk == libtcod.KEY_DOWN):
+		elif key.vk == libtcod.KEY_DOWN or key.vk == libtcod.KEY_KP2:
 			self.move_or_attack(0, 1)
-		
-		elif(key.vk == libtcod.KEY_LEFT):
+		elif key.vk == libtcod.KEY_LEFT or key.vk == libtcod.KEY_KP4:
 			self.move_or_attack(-1, 0)
-		
-		elif(key.vk == libtcod.KEY_RIGHT):
+		elif key.vk == libtcod.KEY_RIGHT or key.vk == libtcod.KEY_KP6:
 			self.move_or_attack(1, 0)
+		elif key.vk == libtcod.KEY_HOME or key.vk == libtcod.KEY_KP7:
+			self.move_or_attack(-1, -1)
+		elif key.vk == libtcod.KEY_PAGEUP or key.vk == libtcod.KEY_KP9:
+			self.move_or_attack(1, -1)
+		elif key.vk == libtcod.KEY_END or key.vk == libtcod.KEY_KP1:
+			self.move_or_attack(-1, 1)
+		elif key.vk == libtcod.KEY_PAGEDOWN or key.vk == libtcod.KEY_KP3:
+			self.move_or_attack(1, 1)
+		elif key.vk == libtcod.KEY_KP5 or chr(key.c) == ".":
+			return "didnt_take_turn"  # Skip turn
 		
 		if not self.action:
 			# Test for other keys if we haven't moved
@@ -703,9 +711,6 @@ class Player(Object):
 				# Climb to the next level of the dungeon (if on stairs)
 				if self.position == gameMap.stairs.position:
 					gameMap.next_level()
-			
-			elif key_char == ".":
-				return "didnt_take_turn"
 			
 		return self.action
 
