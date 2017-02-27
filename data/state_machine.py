@@ -27,7 +27,7 @@ class StateMachine(object):
         self.state.draw(camera)
         
     def change_state(self):
-        # When the current state is done executing, we'll first call its cleanup function to get any variables it needs to remember (persistant_variables).
+        # When the current state is done executing, we'll first call its cleanup function to get any variables it needs to remember (persist).
         # Then we switch to a new state and have that new state set up and remember the variables
         
         # Store current state name as the previous and the next state name as the current's
@@ -35,17 +35,14 @@ class StateMachine(object):
         self.state_name = self.state.next
         
         # Keep any variables we want to remember while also cleaning up the current state
-        persistant_variables = self.state.cleanup()
+        persist = self.state.cleanup()
         
         # Change the current state and call its startup function, while also giving it any persistant variables
         self.state = self.state_dict[self.state_name]
-        self.state.startup(persistant_variables)
+        self.state.startup(persist)
         
         # And set the (now current) state's previous state
         self.state.previous_state = previous_state
-        
-    def get_event(self, events):
-        pass
         
 class _State(object):
     # This is a basic state class, all states should inherit this one
@@ -54,17 +51,17 @@ class _State(object):
         self.quit = False
         self.previous_state = None
         self.next_state = None
-        self.persistant_variables = {}
+        self.persist = {}
         
     def cleanup(self):
         # Set self.done to False for next time this state is used
         self.done = False
         # Give back the persistant variables
-        return self.persistant_variables
+        return self.persist
         
-    def startup(self, persistant_variables):
+    def startup(self, persist):
         # Save variables to remember
-        self.persistant_variables = persistant_variables
+        self.persist = persist
     
     def update(self, input):
         pass
