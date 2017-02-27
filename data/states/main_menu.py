@@ -108,10 +108,15 @@ class LoadGame(menu_helper.BasicMenu):
     def __init__(self):
         menu_helper.BasicMenu.__init__(self)
         self.back_text = "Back to the main menu"    # Text for the back button
+        self.saves_dir = os.path.join(os.curdir, "saves")
     
     def startup(self, persist):
         self.persist = persist
-        self.files = self.get_save_files()          # A list of all saved games
+        
+        if not os.path.exists(self.saves_dir):
+            os.makedirs(self.saves_dir)
+        
+        self.files = self.get_save_files() # A list of all saved games
         self.make_menu()
     
     def update(self, input):
@@ -141,7 +146,7 @@ class LoadGame(menu_helper.BasicMenu):
         
     def get_save_files(self):
         files = []
-        for file in os.listdir(os.path.join(os.curdir, "saves")):
+        for file in os.listdir(self.saves_dir):
             if file.endswith(".sav"):
                 files.append(file)
                 
