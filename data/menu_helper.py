@@ -1,7 +1,7 @@
 import libtcodpy, prepare, state_machine
 
 class BasicMenu(state_machine._State):
-    def __init__(self, header, options, width, bg_transparency=0.7, fg_transparency=1.0):
+    def __init__(self, header="", options=[], width=30, bg_transparency=0.7, fg_transparency=1.0):
         state_machine._State.__init__(self)
         self.header = header
         self.options = options
@@ -26,25 +26,12 @@ class BasicMenu(state_machine._State):
     def get_menu_input(self, input):
         key, mouse = input["key"], input["mouse"]
         
-        if mouse.lbutton:
-            (menu_x, menu_y) = (mouse.cx - self.x_offset, (mouse.cy - self.y_offset) / 2)
-            
-            if menu_x >= 0 and menu_x < self.width and menu_y >= 0 and menu_y < self.height - self.header_height:
-                self.index = menu_y
-                
-        if mouse.lbutton_pressed:
-            (menu_x, menu_y) = (mouse.cx - self.x_offset, (mouse.cy - self.y_offset) / 2)
-            
-            if menu_x >= 0 and menu_x < self.width and menu_y >= 0 and menu_y < self.height - self.header_height:
-                self.choice_made = True
-                self.index = menu_y
-        
         # Move selection up or down
         if key.vk == libtcodpy.KEY_DOWN:
             self.index = (self.index + 1) % len(self.options)
         elif key.vk == libtcodpy.KEY_UP:
             self.index = (self.index - 1) % len(self.options)
-        elif key.vk == libtcodpy.KEY_ENTER:
+        elif key.vk == libtcodpy.KEY_ENTER and not (key.lalt or key.ralt):
             self.choice_made = True
         
     def draw_window(self):
@@ -56,11 +43,12 @@ class BasicMenu(state_machine._State):
         
     def highlight_index(self):
         # Highlights the option at self.index
-        y = self.index * 2 + self.header_height + 1
+        current_row = self.index * 2 + self.header_height + 1
         
-        for x in range(0, self.width):
-            libtcodpy.console_set_char_background(self.window, x, y, libtcodpy.white, libtcodpy.BKGND_SET)
-            libtcodpy.console_set_char_foreground(self.window, x, y, libtcodpy.black)
+        for y in range(current_row - 1, current_row + 2):
+            for x in range(0, self.width):
+                libtcodpy.console_set_char_background(self.window, x, y, libtcodpy.white, libtcodpy.BKGND_SET)
+                libtcodpy.console_set_char_foreground(self.window, x, y, libtcodpy.light_green)
         
     def print_header(self):
         # Prints the header onto self.window (with auto-wrap)
@@ -70,15 +58,9 @@ class BasicMenu(state_machine._State):
         # Prints all the options onto self.window
         y = self.header_height
         for option_text in self.options:
-            for x in range(0, self.width):
-                libtcodpy.console_set_char_background(self.window, x, y, libtcodpy.white, libtcodpy.BKGND_SET)
             y += 1
             libtcodpy.console_print_ex(self.window, 0, y, libtcodpy.BKGND_NONE, libtcodpy.LEFT, option_text)
             y += 1
-        
-        y + 1
-        for x in range(0, self.width):
-            libtcodpy.console_set_char_background(self.window, x, y, libtcodpy.white, libtcodpy.BKGND_SET)
         
     def make_window(self):
         # Dimensions of the menu

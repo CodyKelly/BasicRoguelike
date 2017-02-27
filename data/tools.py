@@ -37,8 +37,8 @@ class Control(object):
             self.done = True
             
     def check_for_fullscreen(self, key):
-        if key.vk == libtcodpy.KEY_ENTER and key.lalt:
-            libtcodpy.console_set_fullscreen(not libtcodpy.console_is_fullscreen)
+        if key.vk == libtcodpy.KEY_ENTER and (key.lalt or key.ralt):
+            libtcodpy.console_set_fullscreen(not libtcodpy.console_is_fullscreen())
             
 class Camera(object):
     def __init__(self):
