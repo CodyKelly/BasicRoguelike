@@ -1,0 +1,3 @@
+- Fix fullscreen (alt+enter)
+- Add NewGame and LoadGame states to main menu
+    - Add Player, Map, and other object classes
