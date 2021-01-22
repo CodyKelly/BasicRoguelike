@@ -1,5 +1,8 @@
 *.pyc
 savegame
+*.bak
+*.dat
+*.dir
 
 # Created by .ignore support plugin (hsz.mobi)
 ### Python template
